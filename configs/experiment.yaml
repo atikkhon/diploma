@@ -8,7 +8,7 @@ data:
   train_masks: gtFine/train
   official_val_images: leftImg8bit/val
   official_val_masks: gtFine/val
-  split_file: data/splits/train_internal_val.csv
+  split_file: data/splits/split_manifest.csv
   internal_val_size: 0.2
   num_classes: 19
   ignore_index: 255
