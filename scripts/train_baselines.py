@@ -41,6 +41,17 @@ BASELINE_MODELS = ["unet", "deeplabv3plus", "pspnet"]
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default="configs/experiment.yaml")
+    parser.add_argument(
+        "--models",
+        nargs="+",
+        choices=BASELINE_MODELS,
+        help="Обучить только указанные модели; по умолчанию обучаются все",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Продолжить каждую модель из <model>_last.pt, если он существует",
+    )
     return parser.parse_args()
 
 
@@ -121,7 +132,11 @@ def create_loaders(
     return train_loader, dev_loader
 
 
-def train_baselines(config_path: str | Path) -> None:
+def train_baselines(
+    config_path: str | Path,
+    model_names: list[str] | None = None,
+    resume: bool = False,
+) -> None:
     config_file = Path(config_path).expanduser().resolve()
     config = load_yaml(config_file)
     require_sections(config)
@@ -150,7 +165,8 @@ def train_baselines(config_path: str | Path) -> None:
             + ", ".join(BASELINE_MODELS)
         )
 
-    for model_name in BASELINE_MODELS:
+    selected_models = model_names or BASELINE_MODELS
+    for model_name in selected_models:
         seed_everything(seed)
         train_loader, dev_loader = create_loaders(config, project_root, seed)
         model = create_model(
@@ -183,6 +199,7 @@ def train_baselines(config_path: str | Path) -> None:
             "experiment_name", "cityscapes_robustness"
         )
         with mlflow_run(experiment_name, model_name, run_parameters) as mlflow_module:
+            resume_path = checkpoint_dir / f"{model_name}_last.pt"
             _, best_path, last_path = train_model(
                 model=model,
                 model_name=model_name,
@@ -201,6 +218,7 @@ def train_baselines(config_path: str | Path) -> None:
                 on_epoch_end=lambda row, epoch: log_metrics_safe(
                     mlflow_module, row, epoch
                 ),
+                resume_path=resume_path if resume else None,
             )
             for artifact in (history_path, best_path, last_path, environment_path):
                 log_artifact_safe(mlflow_module, artifact)
@@ -213,7 +231,7 @@ def train_baselines(config_path: str | Path) -> None:
 def main() -> None:
     args = parse_args()
     try:
-        train_baselines(args.config)
+        train_baselines(args.config, args.models, args.resume)
     except (FileNotFoundError, ValueError, RuntimeError, OSError) as error:
         raise SystemExit(f"Ошибка обучения: {error}") from error
 

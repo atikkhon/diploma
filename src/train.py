@@ -2,6 +2,7 @@
 
 import math
 import time
+import warnings
 from pathlib import Path
 from typing import Any, Callable
 
@@ -149,6 +150,7 @@ def train_model(
     num_classes: int = 19,
     ignore_index: int = 255,
     on_epoch_end: Callable[[dict[str, float], int], None] | None = None,
+    resume_path: str | Path | None = None,
 ) -> tuple[pd.DataFrame, Path, Path]:
     """Run all epochs, saving CSV after each epoch plus best/last checkpoints."""
     if epochs <= 0:
@@ -164,8 +166,51 @@ def train_model(
     scaler = torch.cuda.amp.GradScaler(enabled=amp_enabled)
     best_miou = -math.inf
     history_rows: list[dict[str, float]] = []
+    start_epoch = 1
 
-    for epoch in range(1, epochs + 1):
+    if resume_path is not None and Path(resume_path).is_file():
+        try:
+            checkpoint = torch.load(
+                resume_path, map_location=device, weights_only=False
+            )
+        except TypeError:  # Compatibility with PyTorch versions before weights_only.
+            checkpoint = torch.load(resume_path, map_location=device)
+        if checkpoint.get("model_name") != model_name:
+            raise ValueError(
+                f"Checkpoint {resume_path} относится к модели "
+                f"{checkpoint.get('model_name')}, а не {model_name}"
+            )
+        model.load_state_dict(checkpoint["model_state_dict"])
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        scaler.load_state_dict(checkpoint.get("scaler_state_dict", {}))
+        best_miou = float(checkpoint.get("best_miou", -math.inf))
+        completed_epoch = int(checkpoint["epoch"])
+        start_epoch = completed_epoch + 1
+        if history_file.is_file():
+            previous_history = pd.read_csv(history_file)
+            previous_history = previous_history.loc[
+                previous_history["epoch"] <= completed_epoch
+            ]
+            history_rows = previous_history.to_dict(orient="records")
+        else:
+            warnings.warn(
+                f"Checkpoint найден, но история отсутствует: {history_file}. "
+                "CSV продолжится с возобновлённой эпохи."
+            )
+        print(
+            f"[{model_name}] resume из {resume_path}: "
+            f"следующая эпоха {start_epoch}/{epochs}"
+        )
+
+    if start_epoch > epochs:
+        if not best_path.is_file():
+            raise FileNotFoundError(
+                f"Обучение уже завершено, но best checkpoint не найден: {best_path}"
+            )
+        print(f"[{model_name}] уже обучена до эпохи {epochs}, повторный запуск пропущен")
+        return pd.DataFrame(history_rows), best_path, Path(resume_path or last_path)
+
+    for epoch in range(start_epoch, epochs + 1):
         if device.type == "cuda":
             torch.cuda.reset_peak_memory_stats(device)
         started_at = time.perf_counter()

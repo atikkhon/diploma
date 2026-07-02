@@ -72,6 +72,12 @@ $env:MLFLOW_TRACKING_URI = "file:./mlruns"
 python scripts/train_baselines.py --config configs/experiment.yaml
 ```
 
+Продолжить отдельную модель из её `last.pt`:
+
+```powershell
+python scripts/train_baselines.py --config configs/experiment.yaml --models unet --resume
+```
+
 ## Результаты
 
 - `checkpoints/` — веса моделей;
