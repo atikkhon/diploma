@@ -1,0 +1,12 @@
+# Every corruption is evaluated at severity levels 1, 2 and 3.
+severity_levels: [1, 2, 3]
+
+corruptions:
+  - gaussian_noise
+  - brightness
+  - contrast
+  - motion_blur
+  - defocus_blur
+  - fog
+  - rain
+  - jpeg_compression

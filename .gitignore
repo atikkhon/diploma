@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments and local settings
+.venv/
+venv/
+.env
+
+# IDE and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Datasets, model weights and experiment tracking
+data/
+checkpoints/*
+!checkpoints/.gitkeep
+mlruns/
+
+# Generated results
+outputs/metrics/*
+outputs/figures/*
+outputs/tables/*
+outputs/predictions/*
+!outputs/metrics/.gitkeep
+!outputs/figures/.gitkeep
+!outputs/tables/.gitkeep
+!outputs/predictions/.gitkeep
+
+# Notebook checkpoints
+.ipynb_checkpoints/

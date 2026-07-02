@@ -1,0 +1,48 @@
+# Reproducibility
+seed: 42
+
+# Dataset paths must point to the extracted Cityscapes directories.
+data:
+  root: data/cityscapes
+  train_images: leftImg8bit/train
+  train_masks: gtFine/train
+  official_val_images: leftImg8bit/val
+  official_val_masks: gtFine/val
+  split_file: data/splits/train_internal_val.csv
+  internal_val_size: 0.2
+  num_classes: 19
+  ignore_index: 255
+  image_width: 384
+  image_height: 192
+
+models:
+  names:
+    - unet
+    - deeplabv3plus
+    - pspnet
+  encoder: resnet34
+  encoder_weights: imagenet
+
+training:
+  epochs: 8
+  batch_size: 8
+  num_workers: 2
+  learning_rate: 0.0003
+  weight_decay: 0.0001
+  device: auto
+  checkpoint_dir: checkpoints
+
+evaluation:
+  batch_size: 8
+  save_predictions: true
+  metrics_dir: outputs/metrics
+  predictions_dir: outputs/predictions
+
+robust_training:
+  enabled: true
+  # Fill after comparing baseline validation results.
+  model_name: null
+
+tracking:
+  uri: file:./mlruns
+  experiment_name: cityscapes_robustness
