@@ -56,7 +56,10 @@ python scripts/build_report_assets.py --config configs/experiment.yaml
 # 7. Запустить тесты.
 python -m pytest tests -q
 
-# 8. Открыть интерфейс MLflow.
+# 8. Сохранить визуальную проверку восьми dev-примеров.
+python scripts/smoke_test_dataset.py --config configs/experiment.yaml --split dev
+
+# 9. Открыть интерфейс MLflow.
 python -m mlflow ui --backend-store-uri ./mlruns
 ```
 
