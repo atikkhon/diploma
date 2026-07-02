@@ -17,6 +17,11 @@ from src.dataset import (
     find_cityscapes_pairs,
     validate_mask,
 )
+from src.metrics import (
+    calculate_metrics,
+    create_confusion_matrix,
+    update_confusion_matrix,
+)
 
 
 @pytest.fixture()
@@ -186,3 +191,31 @@ def test_ignore_index_is_preserved_and_ignored_by_loss(
         "Изменение logits в пикселе 255 повлияло на loss; "
         "проверьте ignore_index=255"
     )
+
+
+def test_metrics_use_one_dataset_confusion_matrix() -> None:
+    targets = torch.tensor([[0, 0, 1, 1, 255]], dtype=torch.int64)
+    predictions = torch.tensor([[0, 1, 1, 1, 18]], dtype=torch.int64)
+
+    complete = create_confusion_matrix(19)
+    update_confusion_matrix(complete, predictions, targets, ignore_index=255)
+
+    accumulated = create_confusion_matrix(19)
+    update_confusion_matrix(
+        accumulated, predictions[:, :2], targets[:, :2], ignore_index=255
+    )
+    update_confusion_matrix(
+        accumulated, predictions[:, 2:], targets[:, 2:], ignore_index=255
+    )
+    assert torch.equal(complete, accumulated), (
+        "Confusion matrix зависит от разбиения на batch; метрики должны "
+        "накапливаться по всему набору"
+    )
+
+    metrics = calculate_metrics(complete)
+    assert complete.sum().item() == 4, "Пиксель ignore_index=255 попал в матрицу"
+    assert metrics["iou_per_class"][0] == pytest.approx(0.5)
+    assert metrics["iou_per_class"][1] == pytest.approx(2.0 / 3.0)
+    assert metrics["miou"] == pytest.approx((0.5 + 2.0 / 3.0) / 2.0)
+    assert metrics["macro_dice"] == pytest.approx((2.0 / 3.0 + 0.8) / 2.0)
+    assert metrics["pixel_accuracy"] == pytest.approx(0.75)

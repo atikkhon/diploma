@@ -63,10 +63,20 @@ python scripts/smoke_test_dataset.py --config configs/experiment.yaml --split de
 python -m mlflow ui --backend-store-uri ./mlruns
 ```
 
+При необходимости задайте URI MLflow через переменную окружения перед
+обучением. Если MLflow недоступен, обучение продолжится, а история останется в
+CSV.
+
+```powershell
+$env:MLFLOW_TRACKING_URI = "file:./mlruns"
+python scripts/train_baselines.py --config configs/experiment.yaml
+```
+
 ## Результаты
 
 - `checkpoints/` — веса моделей;
-- `outputs/metrics/` — метрики в CSV или JSON;
+- `outputs/metrics/training_history_<model>.csv` — история каждой эпохи;
+- `outputs/metrics/training_environment.json` — версии ПО и сведения о GPU;
 - `outputs/figures/` — графики и иллюстрации;
 - `outputs/tables/` — итоговые таблицы;
 - `outputs/predictions/` — примеры предсказаний;
