@@ -128,7 +128,7 @@ def backfill(config_path: str | Path, model_name: str) -> str:
         run_name,
         checkpoint_config,
         run_id_path=run_id_path,
-        resume_existing=existing_run is not None,
+        existing_run_id=(existing_run.info.run_id if existing_run is not None else None),
         tags=tags,
     ) as mlflow_module:
         if mlflow_module is None:

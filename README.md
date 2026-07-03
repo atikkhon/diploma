@@ -77,19 +77,7 @@ CSV и checkpoints сохранятся.
 $root = (Get-Location).Path.Replace('\', '/')
 $env:MLFLOW_TRACKING_URI = "sqlite:///mlflow.db"
 $env:MLFLOW_ARTIFACT_ROOT = "file:///$root/mlartifacts"
-python scripts/train_baselines.py --config configs/experiment.yaml --models unet --fresh
-```
-
-Продолжить отдельную модель из её `last.pt`:
-
-```powershell
-python scripts/train_baselines.py --config configs/experiment.yaml --models unet --resume
-```
-
-Перед выбором действия проверьте состояние:
-
-```powershell
-python scripts/inspect_training_state.py --config configs/experiment.yaml --model unet
+python scripts/train_baselines.py --config configs/experiment.yaml --models unet
 ```
 
 Занести завершённую модель в MLflow после обучения, выполненного без MLflow:
@@ -108,7 +96,7 @@ python scripts/backfill_mlflow.py --config configs/experiment.yaml --model unet
 - `outputs/predictions/` — примеры предсказаний;
 - `mlflow.db` — SQLite metadata MLflow;
 - `mlartifacts/` — artifacts MLflow;
-- `outputs/metrics/mlflow_run_id_<model>.txt` — идентификатор run для resume.
+- `outputs/metrics/mlflow_run_id_<model>.txt` — идентификатор MLflow run.
 
 Ноутбук `notebooks/run_all_colab.ipynb` предназначен для последовательного
 запуска тех же скриптов в Google Colab без дублирования основной логики.

@@ -9,10 +9,8 @@ import pandas as pd
 import pytest
 import torch
 import torch.nn.functional as functional
-import yaml
 
 from scripts.create_split import validate_manifest
-from scripts.inspect_training_state import inspect_training_state
 from src.dataset import (
     CityscapesDataset,
     IMAGE_SUFFIX,
@@ -282,39 +280,3 @@ def test_tracking_parameters_are_flattened() -> None:
         "training.epochs": 8,
         "models": "unet,pspnet",
     }
-
-
-def test_inspector_recommends_skip_for_completed_model(tmp_path: Path) -> None:
-    config_dir = tmp_path / "configs"
-    checkpoint_dir = tmp_path / "checkpoints"
-    history_dir = tmp_path / "outputs" / "metrics"
-    config_dir.mkdir()
-    checkpoint_dir.mkdir()
-    history_dir.mkdir(parents=True)
-    config_path = config_dir / "experiment.yaml"
-    config_path.write_text(
-        yaml.safe_dump(
-            {
-                "seed": 42,
-                "training": {
-                    "epochs": 8,
-                    "checkpoint_dir": "checkpoints",
-                    "history_dir": "outputs/metrics",
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
-    torch.save(
-        {"epoch": 8, "model_name": "unet"}, checkpoint_dir / "unet_last.pt"
-    )
-    torch.save(
-        {"epoch": 3, "model_name": "unet"}, checkpoint_dir / "unet_best.pt"
-    )
-    pd.DataFrame({"epoch": list(range(1, 9)), "dev_miou": [0.0] * 8}).to_csv(
-        history_dir / "training_history_unet.csv", index=False
-    )
-
-    state = inspect_training_state(config_path, "unet")
-    assert state["state"] == "completed"
-    assert state["recommended_action"] == "skip"

@@ -2,7 +2,6 @@
 
 import argparse
 import sys
-import warnings
 from pathlib import Path
 from typing import Any
 
@@ -43,17 +42,6 @@ def parse_args() -> argparse.Namespace:
         nargs="+",
         choices=BASELINE_MODELS,
         help="Обучить только указанные модели; по умолчанию обучаются все",
-    )
-    action = parser.add_mutually_exclusive_group()
-    action.add_argument(
-        "--resume",
-        action="store_true",
-        help="Продолжить из <model>_last.pt и прежнего MLflow run",
-    )
-    action.add_argument(
-        "--fresh",
-        action="store_true",
-        help="Явно начать модель заново и создать новый MLflow run",
     )
     return parser.parse_args()
 
@@ -139,8 +127,6 @@ def create_loaders(
 def train_baselines(
     config_path: str | Path,
     model_names: list[str] | None = None,
-    resume: bool = False,
-    fresh: bool = False,
 ) -> None:
     config_file = Path(config_path).expanduser().resolve()
     config = load_yaml(config_file)
@@ -174,17 +160,6 @@ def train_baselines(
     for model_name in selected_models:
         history_path = history_dir / f"training_history_{model_name}.csv"
         run_id_path = history_dir / f"mlflow_run_id_{model_name}.txt"
-        resume_path = checkpoint_dir / f"{model_name}_last.pt"
-        if resume and not resume_path.is_file():
-            raise FileNotFoundError(
-                f"Запрошен resume, но last checkpoint не найден: {resume_path}"
-            )
-        if fresh and (resume_path.exists() or history_path.exists()):
-            warnings.warn(
-                f"Fresh-запуск {model_name} перезапишет историю и checkpoints "
-                "после завершения первой новой эпохи.",
-                RuntimeWarning,
-            )
 
         print(f"Подготовка модели {model_name}...", flush=True)
         seed_everything(seed)
@@ -230,7 +205,6 @@ def train_baselines(
             run_name,
             run_parameters,
             run_id_path=run_id_path,
-            resume_existing=resume,
             tags=tags,
         ) as mlflow_module:
             _, best_path, last_path = train_model(
@@ -251,7 +225,6 @@ def train_baselines(
                 on_epoch_end=lambda row, epoch: log_metrics_safe(
                     mlflow_module, row, epoch
                 ),
-                resume_path=resume_path if resume else None,
             )
             for artifact in (history_path, best_path, last_path, environment_path):
                 log_artifact_safe(mlflow_module, artifact)
@@ -269,12 +242,7 @@ def train_baselines(
 def main() -> None:
     args = parse_args()
     try:
-        train_baselines(
-            args.config,
-            args.models,
-            resume=args.resume,
-            fresh=args.fresh,
-        )
+        train_baselines(args.config, args.models)
     except (FileNotFoundError, ValueError, RuntimeError, OSError) as error:
         raise SystemExit(f"Ошибка обучения: {error}") from error
 

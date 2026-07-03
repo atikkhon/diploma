@@ -83,13 +83,6 @@ def check_mlflow_connection(experiment_name: str) -> dict[str, str]:
     }
 
 
-def _read_run_id(run_id_path: Path | None) -> str | None:
-    if run_id_path is None or not run_id_path.is_file():
-        return None
-    value = run_id_path.read_text(encoding="utf-8").strip()
-    return value or None
-
-
 def _save_run_id(run_id_path: Path | None, run_id: str) -> None:
     if run_id_path is None:
         return
@@ -103,10 +96,10 @@ def mlflow_run(
     run_name: str,
     parameters: dict[str, Any],
     run_id_path: str | Path | None = None,
-    resume_existing: bool = False,
+    existing_run_id: str | None = None,
     tags: dict[str, str] | None = None,
 ) -> Iterator[Any | None]:
-    """Start or resume an optional SQLite MLflow run and persist its run ID."""
+    """Start an optional SQLite MLflow run and persist its run ID."""
     mlflow_api = None
     active_mlflow = None
     run_started = False
@@ -122,24 +115,17 @@ def mlflow_run(
             mlflow, experiment_name, artifact_root
         )
 
-        saved_run_id = _read_run_id(run_id_file) if resume_existing else None
         active_run = None
-        if resume_existing and saved_run_id is None:
-            warnings.warn(
-                f"MLflow run_id для resume не найден: {run_id_file}. "
-                "Будет создан новый MLflow run; обучение продолжится.",
-                RuntimeWarning,
-            )
-        if saved_run_id is not None:
+        if existing_run_id is not None:
             try:
                 client = MlflowClient(tracking_uri=tracking_uri)
-                saved_run = client.get_run(saved_run_id)
+                saved_run = client.get_run(existing_run_id)
                 if str(saved_run.info.experiment_id) != str(experiment.experiment_id):
                     raise ValueError("run относится к другому experiment")
-                active_run = mlflow.start_run(run_id=saved_run_id, tags=tags)
+                active_run = mlflow.start_run(run_id=existing_run_id, tags=tags)
             except Exception as error:
                 warnings.warn(
-                    f"Не удалось продолжить MLflow run {saved_run_id}: {error}. "
+                    f"Не удалось повторно открыть MLflow run {existing_run_id}: {error}. "
                     "Будет создан новый run; CSV и checkpoint не затронуты.",
                     RuntimeWarning,
                 )
