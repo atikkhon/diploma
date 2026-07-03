@@ -33,20 +33,30 @@ def train_one_epoch(
     use_amp: bool = True,
     num_classes: int = 19,
     ignore_index: int = 255,
+    log_interval: int = 25,
+    progress_prefix: str = "train",
 ) -> dict[str, float | list[float]]:
-    """Train for one epoch and calculate metrics from one global matrix."""
+    """Train for one epoch and report loss without costly train-set IoU."""
     model.train()
-    confusion = create_confusion_matrix(num_classes)
-    weighted_loss_sum = 0.0
+    del num_classes
+    weighted_loss_sum = torch.zeros((), dtype=torch.float64, device=device)
     valid_pixel_sum = 0
     amp_enabled = _mixed_precision_enabled(device, use_amp)
+    batch_count = len(dataloader)
+    started_at = time.perf_counter()
+    print(
+        f"{progress_prefix}: ожидание первого batch "
+        f"(всего batch: {batch_count})...",
+        flush=True,
+    )
 
-    for batch in dataloader:
+    for batch_index, batch in enumerate(dataloader, start=1):
         images = batch["image"].to(device, non_blocking=True)
-        targets = batch["mask"].to(device, non_blocking=True)
-        valid_pixels = int((targets != ignore_index).sum().item())
+        target_cpu = batch["mask"]
+        valid_pixels = int((target_cpu != ignore_index).sum().item())
         if valid_pixels == 0:
             continue
+        targets = target_cpu.to(device, non_blocking=True)
 
         optimizer.zero_grad(set_to_none=True)
         with torch.autocast(
@@ -61,15 +71,19 @@ def train_one_epoch(
         scaler.step(optimizer)
         scaler.update()
 
-        weighted_loss_sum += float(loss.item()) * valid_pixels
+        weighted_loss_sum += loss.detach().to(torch.float64) * valid_pixels
         valid_pixel_sum += valid_pixels
-        update_confusion_matrix(confusion, logits, targets, ignore_index)
+        if batch_index == 1 or batch_index % log_interval == 0 or batch_index == batch_count:
+            elapsed = time.perf_counter() - started_at
+            print(
+                f"{progress_prefix}: batch {batch_index}/{batch_count}, "
+                f"loss={loss.item():.4f}, elapsed={elapsed:.1f}s",
+                flush=True,
+            )
 
     if valid_pixel_sum == 0:
         raise ValueError("Train-набор не содержит ни одного неигнорируемого пикселя")
-    result = calculate_metrics(confusion)
-    result["loss"] = weighted_loss_sum / valid_pixel_sum
-    return result
+    return {"loss": float((weighted_loss_sum / valid_pixel_sum).item())}
 
 
 @torch.inference_mode()
@@ -81,20 +95,30 @@ def validate(
     use_amp: bool = True,
     num_classes: int = 19,
     ignore_index: int = 255,
+    log_interval: int = 25,
+    progress_prefix: str = "dev",
 ) -> dict[str, float | list[float]]:
     """Evaluate the complete set before calculating any segmentation metric."""
     model.eval()
-    confusion = create_confusion_matrix(num_classes)
-    weighted_loss_sum = 0.0
+    confusion = create_confusion_matrix(num_classes, device=device)
+    weighted_loss_sum = torch.zeros((), dtype=torch.float64, device=device)
     valid_pixel_sum = 0
     amp_enabled = _mixed_precision_enabled(device, use_amp)
+    batch_count = len(dataloader)
+    started_at = time.perf_counter()
+    print(
+        f"{progress_prefix}: ожидание первого batch "
+        f"(всего batch: {batch_count})...",
+        flush=True,
+    )
 
-    for batch in dataloader:
+    for batch_index, batch in enumerate(dataloader, start=1):
         images = batch["image"].to(device, non_blocking=True)
-        targets = batch["mask"].to(device, non_blocking=True)
-        valid_pixels = int((targets != ignore_index).sum().item())
+        target_cpu = batch["mask"]
+        valid_pixels = int((target_cpu != ignore_index).sum().item())
         if valid_pixels == 0:
             continue
+        targets = target_cpu.to(device, non_blocking=True)
         with torch.autocast(
             device_type=device.type, dtype=torch.float16, enabled=amp_enabled
         ):
@@ -103,14 +127,27 @@ def validate(
         if not torch.isfinite(loss):
             raise RuntimeError(f"Получен нечисловой validation loss: {loss.item()}")
 
-        weighted_loss_sum += float(loss.item()) * valid_pixels
+        weighted_loss_sum += loss.detach().to(torch.float64) * valid_pixels
         valid_pixel_sum += valid_pixels
-        update_confusion_matrix(confusion, logits, targets, ignore_index)
+        update_confusion_matrix(
+            confusion,
+            logits,
+            targets,
+            ignore_index,
+            validate_indices=False,
+        )
+        if batch_index == 1 or batch_index % log_interval == 0 or batch_index == batch_count:
+            elapsed = time.perf_counter() - started_at
+            print(
+                f"{progress_prefix}: batch {batch_index}/{batch_count}, "
+                f"loss={loss.item():.4f}, elapsed={elapsed:.1f}s",
+                flush=True,
+            )
 
     if valid_pixel_sum == 0:
         raise ValueError("Dev-набор не содержит ни одного неигнорируемого пикселя")
     result = calculate_metrics(confusion)
-    result["loss"] = weighted_loss_sum / valid_pixel_sum
+    result["loss"] = float((weighted_loss_sum / valid_pixel_sum).item())
     return result
 
 
@@ -167,6 +204,9 @@ def train_model(
     best_miou = -math.inf
     history_rows: list[dict[str, float]] = []
     start_epoch = 1
+    log_interval = int(config.get("training", {}).get("log_interval", 25))
+    if log_interval <= 0:
+        raise ValueError("training.log_interval должен быть положительным")
 
     if resume_path is not None and Path(resume_path).is_file():
         try:
@@ -214,6 +254,10 @@ def train_model(
         if device.type == "cuda":
             torch.cuda.reset_peak_memory_stats(device)
         started_at = time.perf_counter()
+        print(
+            f"[{model_name}] начало эпохи {epoch:02d}/{epochs}",
+            flush=True,
+        )
 
         train_result = train_one_epoch(
             model,
@@ -225,6 +269,8 @@ def train_model(
             use_amp,
             num_classes,
             ignore_index,
+            log_interval,
+            f"[{model_name}] train {epoch:02d}/{epochs}",
         )
         dev_result = validate(
             model,
@@ -234,6 +280,8 @@ def train_model(
             use_amp,
             num_classes,
             ignore_index,
+            log_interval,
+            f"[{model_name}] dev {epoch:02d}/{epochs}",
         )
         epoch_seconds = time.perf_counter() - started_at
         peak_gpu_memory_mb = (
@@ -250,7 +298,6 @@ def train_model(
             "epoch_seconds": float(epoch_seconds),
             "peak_gpu_memory_mb": float(peak_gpu_memory_mb),
         }
-        row.update(flatten_metrics(train_result, "train"))
         row.update(flatten_metrics(dev_result, "dev"))
         history_rows.append(row)
         history = pd.DataFrame(history_rows)
@@ -294,6 +341,7 @@ def train_model(
             f"dev_loss={row['dev_loss']:.4f}, "
             f"dev_mIoU={row['dev_miou']:.4f}, "
             f"time={epoch_seconds:.1f}s, peak_gpu={peak_gpu_memory_mb:.0f}MB"
+            , flush=True
         )
 
     return pd.DataFrame(history_rows), best_path, last_path

@@ -260,15 +260,23 @@ def validate_mask(mask: np.ndarray, mask_path: str | Path = "<mask>") -> None:
         )
 
 
-def read_mask(mask_path: str | Path) -> np.ndarray:
-    """Read a mask unchanged and report a clear error for a broken file."""
+def read_mask(
+    mask_path: str | Path,
+    validate_values: bool = True,
+) -> np.ndarray:
+    """Read a mask, optionally checking all pixel values with ``np.unique``."""
     path = Path(mask_path)
     if not path.is_file():
         raise FileNotFoundError(f"Файл маски не найден: {path}")
     mask = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
     if mask is None:
         raise ValueError(f"OpenCV не удалось прочитать маску: {path}")
-    validate_mask(mask, path)
+    if mask.ndim != 2:
+        raise ValueError(
+            f"Маска должна быть одноканальной, shape={mask.shape}: {path}"
+        )
+    if validate_values:
+        validate_mask(mask, path)
     return mask
 
 
@@ -363,7 +371,9 @@ class CityscapesDataset(Dataset):
         if image_bgr is None:
             raise ValueError(f"OpenCV не удалось прочитать изображение: {image_path}")
         image = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
-        mask = read_mask(mask_path)
+        # create_split.py already validates every full-resolution mask once.
+        # Repeating np.unique over 2048x1024 pixels here would stall every epoch.
+        mask = read_mask(mask_path, validate_values=False)
         if image.shape[:2] != mask.shape[:2]:
             raise ValueError(
                 f"Размеры изображения {image.shape[:2]} и маски {mask.shape[:2]} "

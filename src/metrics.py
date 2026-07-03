@@ -28,11 +28,16 @@ CITYSCAPES_CLASS_NAMES = [
 ]
 
 
-def create_confusion_matrix(num_classes: int = 19) -> torch.Tensor:
-    """Return an empty CPU int64 confusion matrix."""
+def create_confusion_matrix(
+    num_classes: int = 19,
+    device: torch.device | str | None = None,
+) -> torch.Tensor:
+    """Return an empty int64 confusion matrix on the requested device."""
     if num_classes <= 0:
         raise ValueError("num_classes должен быть положительным")
-    return torch.zeros((num_classes, num_classes), dtype=torch.int64)
+    return torch.zeros(
+        (num_classes, num_classes), dtype=torch.int64, device=device
+    )
 
 
 def update_confusion_matrix(
@@ -40,6 +45,7 @@ def update_confusion_matrix(
     predictions: torch.Tensor,
     targets: torch.Tensor,
     ignore_index: int = 255,
+    validate_indices: bool = True,
 ) -> torch.Tensor:
     """Add a batch to the global matrix; rows are targets, columns predictions."""
     if confusion_matrix.ndim != 2 or confusion_matrix.shape[0] != confusion_matrix.shape[1]:
@@ -53,24 +59,30 @@ def update_confusion_matrix(
             f"targets {tuple(targets.shape)}"
         )
 
-    predictions = predictions.detach().reshape(-1).to(torch.int64).cpu()
-    targets = targets.detach().reshape(-1).to(torch.int64).cpu()
+    device = confusion_matrix.device
+    predictions = predictions.detach().reshape(-1).to(
+        device=device, dtype=torch.int64
+    )
+    targets = targets.detach().reshape(-1).to(device=device, dtype=torch.int64)
     not_ignored = targets != ignore_index
-    invalid_targets = not_ignored & ((targets < 0) | (targets >= num_classes))
-    if torch.any(invalid_targets):
-        invalid_value = targets[invalid_targets][0].item()
-        raise ValueError(f"Маска содержит недопустимый индекс класса: {invalid_value}")
+    if validate_indices:
+        invalid_targets = not_ignored & ((targets < 0) | (targets >= num_classes))
+        if torch.any(invalid_targets):
+            invalid_value = targets[invalid_targets][0].item()
+            raise ValueError(
+                f"Маска содержит недопустимый индекс класса: {invalid_value}"
+            )
     valid = not_ignored
-    if not torch.any(valid):
-        return confusion_matrix
 
     valid_predictions = predictions[valid]
     valid_targets = targets[valid]
-    if torch.any((valid_predictions < 0) | (valid_predictions >= num_classes)):
-        invalid_value = valid_predictions[
-            (valid_predictions < 0) | (valid_predictions >= num_classes)
-        ][0].item()
-        raise ValueError(f"Предсказан недопустимый индекс класса: {invalid_value}")
+    if validate_indices:
+        invalid_predictions = (valid_predictions < 0) | (
+            valid_predictions >= num_classes
+        )
+        if torch.any(invalid_predictions):
+            invalid_value = valid_predictions[invalid_predictions][0].item()
+            raise ValueError(f"Предсказан недопустимый индекс класса: {invalid_value}")
 
     encoded = valid_targets * num_classes + valid_predictions
     batch_matrix = torch.bincount(

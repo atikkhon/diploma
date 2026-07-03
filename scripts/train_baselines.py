@@ -129,6 +129,12 @@ def create_loaders(
     # A separate generator prevents train iteration from changing dev state.
     loader_options["generator"] = make_dataloader_generator(seed + 1)
     dev_loader = DataLoader(dev_dataset, shuffle=False, **loader_options)
+    print(
+        f"DataLoader: train={len(train_dataset)} изображений/"
+        f"{len(train_loader)} batch, dev={len(dev_dataset)} изображений/"
+        f"{len(dev_loader)} batch, workers={num_workers}, batch_size={batch_size}",
+        flush=True,
+    )
     return train_loader, dev_loader
 
 
@@ -167,6 +173,7 @@ def train_baselines(
 
     selected_models = model_names or BASELINE_MODELS
     for model_name in selected_models:
+        print(f"Подготовка модели {model_name}...", flush=True)
         seed_everything(seed)
         train_loader, dev_loader = create_loaders(config, project_root, seed)
         model = create_model(
@@ -175,6 +182,7 @@ def train_baselines(
             encoder_name=str(model_config.get("encoder", "resnet34")),
             encoder_weights=model_config.get("encoder_weights", "imagenet"),
         ).to(device)
+        print(f"Модель {model_name} загружена на {device}", flush=True)
         optimizer = AdamW(
             model.parameters(),
             lr=float(training["learning_rate"]),
