@@ -91,6 +91,10 @@ python scripts/backfill_mlflow.py --config configs/experiment.yaml --model unet
 - `checkpoints/` — веса моделей;
 - `outputs/metrics/training_history_<model>.csv` — история каждой эпохи;
 - `outputs/metrics/training_environment.json` — версии ПО и сведения о GPU;
+- `outputs/metrics/clean_summary.csv` — итоговые clean-метрики моделей;
+- `outputs/metrics/clean_per_class_iou.csv` — IoU 19 классов;
+- `outputs/metrics/confusion_matrix_<model>.csv` — общая confusion matrix;
+- `outputs/metrics/resource_summary.csv` — inference time, параметры и GPU memory;
 - `outputs/figures/` — графики и иллюстрации;
 - `outputs/tables/` — итоговые таблицы;
 - `outputs/predictions/` — примеры предсказаний;

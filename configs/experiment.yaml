@@ -39,6 +39,7 @@ evaluation:
   batch_size: 8
   save_predictions: true
   metrics_dir: outputs/metrics
+  figures_dir: outputs/figures
   predictions_dir: outputs/predictions
 
 robust_training:

@@ -11,6 +11,7 @@ import torch
 import torch.nn.functional as functional
 
 from scripts.create_split import validate_manifest
+from scripts.evaluate_clean import require_official_val_path, save_confusion_matrix
 from src.dataset import (
     CityscapesDataset,
     IMAGE_SUFFIX,
@@ -280,3 +281,20 @@ def test_tracking_parameters_are_flattened() -> None:
         "training.epochs": 8,
         "models": "unet,pspnet",
     }
+
+
+def test_clean_evaluation_rejects_train_path() -> None:
+    require_official_val_path("leftImg8bit/val", "official_val_images")
+    with pytest.raises(ValueError, match="официальный val"):
+        require_official_val_path("leftImg8bit/train", "official_val_images")
+
+
+def test_confusion_matrix_is_saved_with_class_labels(tmp_path: Path) -> None:
+    confusion = torch.eye(19, dtype=torch.int64)
+    destination = save_confusion_matrix(confusion, "unet", tmp_path)
+    saved = pd.read_csv(destination)
+    assert destination.name == "confusion_matrix_unet.csv"
+    assert saved.shape == (19, 20), (
+        "CSV confusion matrix должен содержать target_class и 19 prediction-столбцов"
+    )
+    assert saved["target_class"].tolist()[0] == "road"
