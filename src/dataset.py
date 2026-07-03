@@ -1,7 +1,7 @@
 """Load paired Cityscapes images and trainId masks with safe transforms."""
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import albumentations as A
 import cv2
@@ -321,6 +321,7 @@ class CityscapesDataset(Dataset):
         width: int = 384,
         height: int = 192,
         transform: A.Compose | None = None,
+        image_corruption: Callable[[np.ndarray, str], np.ndarray] | None = None,
     ) -> None:
         self.dataset_root = Path(dataset_root).expanduser().resolve()
         if not self.dataset_root.is_dir():
@@ -346,6 +347,11 @@ class CityscapesDataset(Dataset):
             raise ValueError("split должен быть train, dev или val")
         if train and split != "train":
             raise ValueError("Случайные train-преобразования разрешены только для train")
+        if train and image_corruption is not None:
+            raise ValueError(
+                "Детерминированные corruption-преобразования предназначены только "
+                "для validation/evaluation"
+            )
 
         self.rows = frame.loc[frame["split"] == split].reset_index(drop=True)
         if self.rows.empty:
@@ -356,12 +362,14 @@ class CityscapesDataset(Dataset):
                 "без случайных аугментаций"
             )
         self.transform = transform or build_transform(train, width, height)
+        self.image_corruption = image_corruption
 
     def __len__(self) -> int:
         return len(self.rows)
 
     def __getitem__(self, index: int) -> dict[str, Any]:
         row = self.rows.iloc[index]
+        image_id = str(row["image_id"])
         image_path = self.dataset_root / str(row["image_path"])
         mask_path = self.dataset_root / str(row["mask_path"])
         if not image_path.is_file():
@@ -371,13 +379,24 @@ class CityscapesDataset(Dataset):
         if image_bgr is None:
             raise ValueError(f"OpenCV не удалось прочитать изображение: {image_path}")
         image = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+        if self.image_corruption is not None:
+            image = self.image_corruption(image.copy(), image_id)
+            if not isinstance(image, np.ndarray):
+                raise TypeError(
+                    f"Corruption для image_id={image_id} вернул не NumPy-массив"
+                )
+            if image.dtype != np.uint8 or image.ndim != 3 or image.shape[2] != 3:
+                raise ValueError(
+                    "Corruption должен вернуть RGB uint8 H×W×3 до нормализации, "
+                    f"получено shape={image.shape}, dtype={image.dtype}"
+                )
         # create_split.py already validates every full-resolution mask once.
         # Repeating np.unique over 2048x1024 pixels here would stall every epoch.
         mask = read_mask(mask_path, validate_values=False)
         if image.shape[:2] != mask.shape[:2]:
             raise ValueError(
                 f"Размеры изображения {image.shape[:2]} и маски {mask.shape[:2]} "
-                f"не совпадают для image_id={row['image_id']}"
+                f"не совпадают для image_id={image_id}"
             )
 
         transformed = self.transform(image=image, mask=mask)
@@ -387,5 +406,5 @@ class CityscapesDataset(Dataset):
         return {
             "image": transformed["image"],
             "mask": output_mask.long(),
-            "image_id": str(row["image_id"]),
+            "image_id": image_id,
         }

@@ -56,6 +56,9 @@ python scripts/visualize_checkpoint.py --config configs/experiment.yaml --model 
 # 3. Оценить модели на чистой официальной validation-выборке.
 python scripts/evaluate_clean.py --config configs/experiment.yaml
 
+# Создать corruption_manifest.csv и сетку примеров без сохранения corrupted-копий.
+python scripts/create_corruption_assets.py --config configs/experiment.yaml --corruptions configs/corruptions.yaml --split dev
+
 # 4. Оценить устойчивость к искажениям.
 python scripts/evaluate_corruptions.py --config configs/experiment.yaml --corruptions configs/corruptions.yaml
 
@@ -101,8 +104,12 @@ python scripts/backfill_mlflow.py --config configs/experiment.yaml --model unet
 - `outputs/metrics/clean_per_class_iou.csv` — IoU 19 классов;
 - `outputs/metrics/confusion_matrix_<model>.csv` — общая confusion matrix;
 - `outputs/metrics/resource_summary.csv` — inference time, параметры и GPU memory;
+- `outputs/metrics/corruption_manifest.csv` — ссылки на clean-пары, corruption,
+  severity и детерминированный SHA256 seed;
 - `outputs/figures/` — графики и иллюстрации, включая
   `segmentation_preview_<model>.png` с ground truth и prediction;
+- `outputs/figures/corruption_examples.png` — clean и три severity для каждого
+  из восьми искажений;
 - `outputs/tables/` — итоговые таблицы;
 - `outputs/predictions/` — примеры предсказаний;
 - `mlflow.db` — SQLite metadata MLflow;

@@ -12,6 +12,16 @@ import torch.nn.functional as functional
 
 from scripts.create_split import validate_manifest
 from scripts.evaluate_clean import require_official_val_path, save_confusion_matrix
+from src.corruptions import (
+    CORRUPTION_MANIFEST_COLUMNS,
+    CORRUPTION_NAMES,
+    SEVERITY_LEVELS,
+    CorruptionTransform,
+    apply_corruption,
+    corruption_seed,
+    create_corruption_manifest,
+    load_corruption_config,
+)
 from src.dataset import (
     CityscapesDataset,
     IMAGE_SUFFIX,
@@ -30,6 +40,10 @@ from src.metrics import (
 from src.tracking import flatten_parameters
 from src.train import create_grad_scaler, train_model
 from src.visualization import colorize_mask
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+CORRUPTION_CONFIG_PATH = PROJECT_ROOT / "configs" / "corruptions.yaml"
 
 
 @pytest.fixture()
@@ -321,6 +335,161 @@ def test_cityscapes_preview_palette_handles_ignore_index() -> None:
     assert colored.shape == (1, 3, 3)
     assert colored[0, 2].tolist() == [0, 0, 0], (
         "ignore_index=255 в preview должен отображаться чёрным"
+    )
+
+
+@pytest.fixture()
+def corruption_input() -> tuple[np.ndarray, dict]:
+    rng = np.random.default_rng(12345)
+    image = rng.integers(0, 256, size=(64, 128, 3), dtype=np.uint8)
+    return image, load_corruption_config(CORRUPTION_CONFIG_PATH)
+
+
+def test_corruptions_are_deterministic(corruption_input: tuple[np.ndarray, dict]) -> None:
+    image, config = corruption_input
+    original = image.copy()
+    for corruption in CORRUPTION_NAMES:
+        first = apply_corruption(image, "aachen_000001_000001", corruption, 2, config)
+        second = apply_corruption(image, "aachen_000001_000001", corruption, 2, config)
+        assert np.array_equal(first, second), (
+            f"{corruption} недетерминирован для одинаковых image_id и severity"
+        )
+    assert corruption_seed("image_a", "gaussian_noise", 1) == corruption_seed(
+        "image_a", "gaussian_noise", 1
+    )
+    assert corruption_seed("image_a", "gaussian_noise", 1) != corruption_seed(
+        "image_b", "gaussian_noise", 1
+    )
+    assert np.array_equal(image, original), "Corruption изменил исходный RGB-массив in-place"
+
+
+def test_corruption_config_matches_fixed_table() -> None:
+    config = load_corruption_config(CORRUPTION_CONFIG_PATH)
+    levels = {
+        name: specification["levels"]
+        for name, specification in config["corruptions"].items()
+    }
+    assert [levels["darkness"][severity]["factor"] for severity in SEVERITY_LEVELS] == [
+        0.75,
+        0.55,
+        0.35,
+    ]
+    assert [levels["contrast"][severity]["factor"] for severity in SEVERITY_LEVELS] == [
+        0.80,
+        0.60,
+        0.40,
+    ]
+    assert [
+        (
+            levels["gaussian_blur"][severity]["kernel_size"],
+            levels["gaussian_blur"][severity]["sigma"],
+        )
+        for severity in SEVERITY_LEVELS
+    ] == [(5, 1.0), (9, 2.0), (13, 3.0)]
+    assert [
+        levels["motion_blur"][severity]["kernel_size"]
+        for severity in SEVERITY_LEVELS
+    ] == [7, 15, 25]
+    assert [
+        levels["gaussian_noise"][severity]["sigma"]
+        for severity in SEVERITY_LEVELS
+    ] == [8.0, 16.0, 28.0]
+    assert [
+        levels["impulse_noise"][severity]["probability"]
+        for severity in SEVERITY_LEVELS
+    ] == [0.005, 0.015, 0.030]
+    assert [levels["jpeg"][severity]["quality"] for severity in SEVERITY_LEVELS] == [
+        70,
+        40,
+        15,
+    ]
+    assert [levels["fog"][severity]["alpha"] for severity in SEVERITY_LEVELS] == [
+        0.15,
+        0.30,
+        0.45,
+    ]
+
+
+def test_corruptions_preserve_shape_dtype_and_range(
+    corruption_input: tuple[np.ndarray, dict],
+) -> None:
+    image, config = corruption_input
+    for corruption in CORRUPTION_NAMES:
+        for severity in SEVERITY_LEVELS:
+            result = apply_corruption(
+                image, "bochum_000002_000001", corruption, severity, config
+            )
+            assert result.shape == image.shape, (
+                f"{corruption} severity={severity} изменил размер изображения"
+            )
+            assert result.dtype == np.uint8, (
+                f"{corruption} severity={severity} вернул {result.dtype}, ожидался uint8"
+            )
+            assert int(result.min()) >= 0 and int(result.max()) <= 255, (
+                f"{corruption} severity={severity} вышел за диапазон 0..255"
+            )
+
+
+def test_corruption_does_not_change_mask(tiny_cityscapes: dict[str, Path]) -> None:
+    config = load_corruption_config(CORRUPTION_CONFIG_PATH)
+    clean_dataset = make_dataset(tiny_cityscapes)
+    corrupted_dataset = CityscapesDataset(
+        manifest_path=tiny_cityscapes["manifest"],
+        dataset_root=tiny_cityscapes["root"],
+        split="dev",
+        train=False,
+        width=384,
+        height=192,
+        image_corruption=CorruptionTransform("impulse_noise", 3, config),
+    )
+    for index in range(len(clean_dataset)):
+        assert torch.equal(
+            clean_dataset[index]["mask"], corrupted_dataset[index]["mask"]
+        ), "Corruption изменил segmentation mask"
+
+
+def test_all_corruption_severities_are_distinct(
+    corruption_input: tuple[np.ndarray, dict],
+) -> None:
+    image, config = corruption_input
+    for corruption in CORRUPTION_NAMES:
+        outputs = [
+            apply_corruption(
+                image, "frankfurt_000003_000001", corruption, severity, config
+            )
+            for severity in SEVERITY_LEVELS
+        ]
+        assert not np.array_equal(outputs[0], outputs[1]), (
+            f"{corruption}: severity 1 и 2 дали одинаковый результат"
+        )
+        assert not np.array_equal(outputs[1], outputs[2]), (
+            f"{corruption}: severity 2 и 3 дали одинаковый результат"
+        )
+
+
+def test_corruption_manifest_contains_references_not_cached_images(
+    tmp_path: Path,
+) -> None:
+    config = load_corruption_config(CORRUPTION_CONFIG_PATH)
+    clean = pd.DataFrame(
+        [
+            {
+                "image_id": "aachen_000001_000001",
+                "image_path": "leftImg8bit/val/a.png",
+                "mask_path": "gtFine/val/a.png",
+                "split": "val",
+            }
+        ]
+    )
+    destination = create_corruption_manifest(
+        clean, tmp_path / "corruption_manifest.csv", config, split="val"
+    )
+    manifest = pd.read_csv(destination)
+    assert tuple(manifest.columns) == CORRUPTION_MANIFEST_COLUMNS
+    assert len(manifest) == len(CORRUPTION_NAMES) * len(SEVERITY_LEVELS)
+    assert manifest[["image_id", "corruption", "severity"]].duplicated().sum() == 0
+    assert not any("corrupted" in column for column in manifest.columns), (
+        "Manifest не должен ссылаться на сохранённые копии corrupted-изображений"
     )
 
 
