@@ -21,6 +21,9 @@ data/
 checkpoints/*
 !checkpoints/.gitkeep
 mlruns/
+mlflow.db
+mlflow.db-*
+mlartifacts/
 
 # Generated results
 outputs/metrics/*

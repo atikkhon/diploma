@@ -2,6 +2,7 @@
 
 import argparse
 import sys
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -17,11 +18,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src.dataset import CityscapesDataset  # noqa: E402
 from src.models import create_model  # noqa: E402
-from src.tracking import (  # noqa: E402
-    log_artifact_safe,
-    log_metrics_safe,
-    mlflow_run,
-)
+from src.tracking import log_artifact_safe, log_metrics_safe, mlflow_run  # noqa: E402
 from src.train import train_model  # noqa: E402
 from src.utils import (  # noqa: E402
     environment_info,
@@ -47,10 +44,16 @@ def parse_args() -> argparse.Namespace:
         choices=BASELINE_MODELS,
         help="Обучить только указанные модели; по умолчанию обучаются все",
     )
-    parser.add_argument(
+    action = parser.add_mutually_exclusive_group()
+    action.add_argument(
         "--resume",
         action="store_true",
-        help="Продолжить каждую модель из <model>_last.pt, если он существует",
+        help="Продолжить из <model>_last.pt и прежнего MLflow run",
+    )
+    action.add_argument(
+        "--fresh",
+        action="store_true",
+        help="Явно начать модель заново и создать новый MLflow run",
     )
     return parser.parse_args()
 
@@ -97,12 +100,8 @@ def create_loaders(
         "width": int(data["image_width"]),
         "height": int(data["image_height"]),
     }
-    train_dataset = CityscapesDataset(
-        **common, split="train", train=True
-    )
-    dev_dataset = CityscapesDataset(
-        **common, split="dev", train=False
-    )
+    train_dataset = CityscapesDataset(**common, split="train", train=True)
+    dev_dataset = CityscapesDataset(**common, split="dev", train=False)
     for split_name, dataset in (("train", train_dataset), ("dev", dev_dataset)):
         for column in ("image_path", "mask_path"):
             for value in dataset.rows[column].astype(str):
@@ -126,7 +125,6 @@ def create_loaders(
         "persistent_workers": num_workers > 0,
     }
     train_loader = DataLoader(train_dataset, shuffle=True, **loader_options)
-    # A separate generator prevents train iteration from changing dev state.
     loader_options["generator"] = make_dataloader_generator(seed + 1)
     dev_loader = DataLoader(dev_dataset, shuffle=False, **loader_options)
     print(
@@ -142,6 +140,7 @@ def train_baselines(
     config_path: str | Path,
     model_names: list[str] | None = None,
     resume: bool = False,
+    fresh: bool = False,
 ) -> None:
     config_file = Path(config_path).expanduser().resolve()
     config = load_yaml(config_file)
@@ -173,6 +172,20 @@ def train_baselines(
 
     selected_models = model_names or BASELINE_MODELS
     for model_name in selected_models:
+        history_path = history_dir / f"training_history_{model_name}.csv"
+        run_id_path = history_dir / f"mlflow_run_id_{model_name}.txt"
+        resume_path = checkpoint_dir / f"{model_name}_last.pt"
+        if resume and not resume_path.is_file():
+            raise FileNotFoundError(
+                f"Запрошен resume, но last checkpoint не найден: {resume_path}"
+            )
+        if fresh and (resume_path.exists() or history_path.exists()):
+            warnings.warn(
+                f"Fresh-запуск {model_name} перезапишет историю и checkpoints "
+                "после завершения первой новой эпохи.",
+                RuntimeWarning,
+            )
+
         print(f"Подготовка модели {model_name}...", flush=True)
         seed_everything(seed)
         train_loader, dev_loader = create_loaders(config, project_root, seed)
@@ -189,7 +202,6 @@ def train_baselines(
             weight_decay=float(training["weight_decay"]),
         )
         criterion = nn.CrossEntropyLoss(ignore_index=int(data["ignore_index"]))
-        history_path = history_dir / f"training_history_{model_name}.csv"
         parameter_count = sum(parameter.numel() for parameter in model.parameters())
         run_parameters = {
             **config,
@@ -206,8 +218,21 @@ def train_baselines(
         experiment_name = config.get("tracking", {}).get(
             "experiment_name", "cityscapes_robustness"
         )
-        with mlflow_run(experiment_name, model_name, run_parameters) as mlflow_module:
-            resume_path = checkpoint_dir / f"{model_name}_last.pt"
+        run_name = f"baseline_{model_name}_seed{seed}"
+        tags = {
+            "model_name": model_name,
+            "seed": str(seed),
+            "source": "training",
+            "status": "running",
+        }
+        with mlflow_run(
+            experiment_name,
+            run_name,
+            run_parameters,
+            run_id_path=run_id_path,
+            resume_existing=resume,
+            tags=tags,
+        ) as mlflow_module:
             _, best_path, last_path = train_model(
                 model=model,
                 model_name=model_name,
@@ -230,6 +255,11 @@ def train_baselines(
             )
             for artifact in (history_path, best_path, last_path, environment_path):
                 log_artifact_safe(mlflow_module, artifact)
+            if mlflow_module is not None:
+                try:
+                    mlflow_module.set_tag("status", "completed")
+                except Exception as error:
+                    warnings.warn(f"Не удалось установить MLflow status tag: {error}")
 
         del model, optimizer, criterion, train_loader, dev_loader
         if device.type == "cuda":
@@ -239,7 +269,12 @@ def train_baselines(
 def main() -> None:
     args = parse_args()
     try:
-        train_baselines(args.config, args.models, args.resume)
+        train_baselines(
+            args.config,
+            args.models,
+            resume=args.resume,
+            fresh=args.fresh,
+        )
     except (FileNotFoundError, ValueError, RuntimeError, OSError) as error:
         raise SystemExit(f"Ошибка обучения: {error}") from error
 

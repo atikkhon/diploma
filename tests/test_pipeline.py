@@ -1,5 +1,6 @@
 """Fast pipeline tests built on a tiny synthetic Cityscapes-like dataset."""
 
+import warnings
 from pathlib import Path
 
 import cv2
@@ -8,8 +9,10 @@ import pandas as pd
 import pytest
 import torch
 import torch.nn.functional as functional
+import yaml
 
 from scripts.create_split import validate_manifest
+from scripts.inspect_training_state import inspect_training_state
 from src.dataset import (
     CityscapesDataset,
     IMAGE_SUFFIX,
@@ -25,6 +28,8 @@ from src.metrics import (
     create_confusion_matrix,
     update_confusion_matrix,
 )
+from src.tracking import flatten_parameters
+from src.train import create_grad_scaler
 
 
 @pytest.fixture()
@@ -256,3 +261,60 @@ def test_nested_kaggle_layout_and_label_id_conversion(tmp_path: Path) -> None:
     assert converted.tolist() == [[255, 0, 1, 18]], (
         f"Неверное преобразование labelId → trainId: {converted.tolist()}"
     )
+
+
+def test_current_grad_scaler_api_has_no_deprecation_warning() -> None:
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        scaler = create_grad_scaler(torch.device("cpu"), enabled=False)
+    assert not scaler.is_enabled()
+    assert not any("deprecated" in str(item.message).lower() for item in caught), (
+        "Создание GradScaler вызвало deprecation warning"
+    )
+
+
+def test_tracking_parameters_are_flattened() -> None:
+    flattened = flatten_parameters(
+        {"seed": 42, "training": {"epochs": 8}, "models": ["unet", "pspnet"]}
+    )
+    assert flattened == {
+        "seed": 42,
+        "training.epochs": 8,
+        "models": "unet,pspnet",
+    }
+
+
+def test_inspector_recommends_skip_for_completed_model(tmp_path: Path) -> None:
+    config_dir = tmp_path / "configs"
+    checkpoint_dir = tmp_path / "checkpoints"
+    history_dir = tmp_path / "outputs" / "metrics"
+    config_dir.mkdir()
+    checkpoint_dir.mkdir()
+    history_dir.mkdir(parents=True)
+    config_path = config_dir / "experiment.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "seed": 42,
+                "training": {
+                    "epochs": 8,
+                    "checkpoint_dir": "checkpoints",
+                    "history_dir": "outputs/metrics",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    torch.save(
+        {"epoch": 8, "model_name": "unet"}, checkpoint_dir / "unet_last.pt"
+    )
+    torch.save(
+        {"epoch": 3, "model_name": "unet"}, checkpoint_dir / "unet_best.pt"
+    )
+    pd.DataFrame({"epoch": list(range(1, 9)), "dev_miou": [0.0] * 8}).to_csv(
+        history_dir / "training_history_unet.csv", index=False
+    )
+
+    state = inspect_training_state(config_path, "unet")
+    assert state["state"] == "completed"
+    assert state["recommended_action"] == "skip"

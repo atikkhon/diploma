@@ -23,13 +23,21 @@ def _mixed_precision_enabled(device: torch.device, requested: bool) -> bool:
     return requested and device.type == "cuda"
 
 
+def create_grad_scaler(device: torch.device, enabled: bool) -> Any:
+    """Create a GradScaler with the current API and a fallback for old PyTorch."""
+    try:
+        return torch.amp.GradScaler(device.type, enabled=enabled)
+    except (AttributeError, TypeError):
+        return torch.cuda.amp.GradScaler(enabled=enabled)
+
+
 def train_one_epoch(
     model: nn.Module,
     dataloader: DataLoader,
     optimizer: torch.optim.Optimizer,
     criterion: nn.Module,
     device: torch.device,
-    scaler: torch.cuda.amp.GradScaler,
+    scaler: Any,
     use_amp: bool = True,
     num_classes: int = 19,
     ignore_index: int = 255,
@@ -154,7 +162,7 @@ def validate(
 def _checkpoint_data(
     model: nn.Module,
     optimizer: torch.optim.Optimizer,
-    scaler: torch.cuda.amp.GradScaler,
+    scaler: Any,
     epoch: int,
     model_name: str,
     best_miou: float,
@@ -200,7 +208,7 @@ def train_model(
     last_path = checkpoint_directory / f"{model_name}_last.pt"
 
     amp_enabled = _mixed_precision_enabled(device, use_amp)
-    scaler = torch.cuda.amp.GradScaler(enabled=amp_enabled)
+    scaler = create_grad_scaler(device, amp_enabled)
     best_miou = -math.inf
     history_rows: list[dict[str, float]] = []
     start_epoch = 1

@@ -66,22 +66,36 @@ python -m pytest tests -q
 python scripts/smoke_test_dataset.py --config configs/experiment.yaml --split dev
 
 # 9. Открыть интерфейс MLflow.
-python -m mlflow ui --backend-store-uri ./mlruns
+python -m mlflow ui --backend-store-uri sqlite:///mlflow.db
 ```
 
-При необходимости задайте URI MLflow через переменную окружения перед
-обучением. Если MLflow недоступен, обучение продолжится, а история останется в
-CSV.
+Перед обучением задайте SQLite backend и отдельный каталог artifacts. Legacy
+FileStore не используется. Если MLflow недоступен, обучение продолжится, а
+CSV и checkpoints сохранятся.
 
 ```powershell
-$env:MLFLOW_TRACKING_URI = "file:./mlruns"
-python scripts/train_baselines.py --config configs/experiment.yaml
+$root = (Get-Location).Path.Replace('\', '/')
+$env:MLFLOW_TRACKING_URI = "sqlite:///mlflow.db"
+$env:MLFLOW_ARTIFACT_ROOT = "file:///$root/mlartifacts"
+python scripts/train_baselines.py --config configs/experiment.yaml --models unet --fresh
 ```
 
 Продолжить отдельную модель из её `last.pt`:
 
 ```powershell
 python scripts/train_baselines.py --config configs/experiment.yaml --models unet --resume
+```
+
+Перед выбором действия проверьте состояние:
+
+```powershell
+python scripts/inspect_training_state.py --config configs/experiment.yaml --model unet
+```
+
+Занести завершённую модель в MLflow после обучения, выполненного без MLflow:
+
+```powershell
+python scripts/backfill_mlflow.py --config configs/experiment.yaml --model unet
 ```
 
 ## Результаты
@@ -92,7 +106,9 @@ python scripts/train_baselines.py --config configs/experiment.yaml --models unet
 - `outputs/figures/` — графики и иллюстрации;
 - `outputs/tables/` — итоговые таблицы;
 - `outputs/predictions/` — примеры предсказаний;
-- `mlruns/` — локальные данные MLflow.
+- `mlflow.db` — SQLite metadata MLflow;
+- `mlartifacts/` — artifacts MLflow;
+- `outputs/metrics/mlflow_run_id_<model>.txt` — идентификатор run для resume.
 
 Ноутбук `notebooks/run_all_colab.ipynb` предназначен для последовательного
 запуска тех же скриптов в Google Colab без дублирования основной логики.
