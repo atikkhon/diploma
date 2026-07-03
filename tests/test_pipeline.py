@@ -14,7 +14,10 @@ from src.dataset import (
     CityscapesDataset,
     IMAGE_SUFFIX,
     MASK_SUFFIX,
+    discover_cityscapes_layout,
     find_cityscapes_pairs,
+    prepare_train_id_masks,
+    read_mask,
     validate_mask,
 )
 from src.metrics import (
@@ -219,3 +222,37 @@ def test_metrics_use_one_dataset_confusion_matrix() -> None:
     assert metrics["miou"] == pytest.approx((0.5 + 2.0 / 3.0) / 2.0)
     assert metrics["macro_dice"] == pytest.approx((2.0 / 3.0 + 0.8) / 2.0)
     assert metrics["pixel_accuracy"] == pytest.approx(0.75)
+
+
+def test_nested_kaggle_layout_and_label_id_conversion(tmp_path: Path) -> None:
+    root = tmp_path / "kaggle_download"
+    image_root = root / "Cityscape Dataset" / "leftImg8bit"
+    gt_fine_root = root / "Fine Annotations" / "gtFine"
+    for split in ("train", "val"):
+        (image_root / split / "aachen").mkdir(parents=True)
+        (gt_fine_root / split / "aachen").mkdir(parents=True)
+
+    layout = discover_cityscapes_layout(root)
+    assert layout["train_images"] == image_root / "train", (
+        "Не найден вложенный KaggleHub-каталог leftImg8bit/train"
+    )
+    assert layout["train_masks"] == gt_fine_root / "train", (
+        "Не найден вложенный KaggleHub-каталог gtFine/train"
+    )
+
+    label_ids = np.array([[0, 7, 8, 33]], dtype=np.uint8)
+    source = gt_fine_root / "train" / "aachen"
+    source_path = source / "aachen_000001_000001_gtFine_labelIds.png"
+    assert cv2.imwrite(str(source_path), label_ids), (
+        f"Не удалось создать тестовую labelIds-маску: {source_path}"
+    )
+    prepared_root = prepare_train_id_masks(
+        gt_fine_root / "train", tmp_path / "prepared_gtFine" / "train"
+    )
+    prepared_path = (
+        prepared_root / "aachen" / "aachen_000001_000001_gtFine_labelTrainIds.png"
+    )
+    converted = read_mask(prepared_path)
+    assert converted.tolist() == [[255, 0, 1, 18]], (
+        f"Неверное преобразование labelId → trainId: {converted.tolist()}"
+    )

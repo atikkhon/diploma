@@ -27,6 +27,12 @@ MANIFEST_COLUMNS = [
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
 
+# Official Cityscapes labelId -> 19-class trainId mapping.
+LABEL_ID_TO_TRAIN_ID = np.full(256, IGNORE_INDEX, dtype=np.uint8)
+LABEL_ID_TO_TRAIN_ID[
+    [7, 8, 11, 12, 13, 17, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 31, 32, 33]
+] = np.arange(NUM_CLASSES, dtype=np.uint8)
+
 
 def image_id_from_name(file_name: str) -> str:
     """Remove the required Cityscapes image suffix and return its image id."""
@@ -53,6 +59,113 @@ def city_and_sequence(image_id: str) -> tuple[str, str]:
             f"city_sequence_frame, получено: {image_id}"
         )
     return parts[0], parts[1]
+
+
+def discover_cityscapes_layout(dataset_root: str | Path) -> dict[str, Path]:
+    """Find nested leftImg8bit and gtFine directories under a downloaded root."""
+    root = Path(dataset_root).expanduser().resolve()
+    if not root.is_dir():
+        raise FileNotFoundError(f"Корень загруженного датасета не найден: {root}")
+
+    image_candidates = sorted(
+        path for path in root.rglob("leftImg8bit")
+        if (path / "train").is_dir() and (path / "val").is_dir()
+    )
+    mask_candidates = sorted(
+        path for path in root.rglob("gtFine")
+        if (path / "train").is_dir() and (path / "val").is_dir()
+    )
+    if len(image_candidates) != 1:
+        raise FileNotFoundError(
+            "Не удалось однозначно найти leftImg8bit с train/val внутри "
+            f"{root}. Найдено вариантов: {len(image_candidates)}"
+        )
+    if len(mask_candidates) != 1:
+        raise FileNotFoundError(
+            "Не удалось однозначно найти gtFine с train/val внутри "
+            f"{root}. Найдено вариантов: {len(mask_candidates)}"
+        )
+    return {
+        "train_images": image_candidates[0] / "train",
+        "val_images": image_candidates[0] / "val",
+        "train_masks": mask_candidates[0] / "train",
+        "val_masks": mask_candidates[0] / "val",
+    }
+
+
+def prepare_train_id_masks(
+    source_split_dir: str | Path,
+    output_split_dir: str | Path,
+) -> Path:
+    """Return existing trainId masks or convert labelIds into a writable cache."""
+    source = Path(source_split_dir).expanduser().resolve()
+    output = Path(output_split_dir).expanduser().resolve()
+    if not source.is_dir():
+        raise FileNotFoundError(f"Каталог gtFine split не найден: {source}")
+
+    train_id_masks = sorted(source.rglob(f"*{MASK_SUFFIX}"))
+    label_id_masks = sorted(source.rglob("*_gtFine_labelIds.png"))
+    if train_id_masks:
+        if label_id_masks and len(train_id_masks) != len(label_id_masks):
+            raise ValueError(
+                f"В {source} найдено {len(train_id_masks)} labelTrainIds-масок и "
+                f"{len(label_id_masks)} labelIds-масок; набор неполный"
+            )
+        print(f"Используются готовые labelTrainIds-маски: {source}")
+        return source
+    if not label_id_masks:
+        raise FileNotFoundError(
+            f"В {source} нет ни *{MASK_SUFFIX}, ни *_gtFine_labelIds.png"
+        )
+
+    output.mkdir(parents=True, exist_ok=True)
+    converted_count = 0
+    reused_count = 0
+    for source_path in label_id_masks:
+        relative = source_path.relative_to(source)
+        destination_name = source_path.name.replace(
+            "_gtFine_labelIds.png", MASK_SUFFIX
+        )
+        destination = output / relative.parent / destination_name
+        if destination.is_file() and destination.stat().st_size > 0:
+            reused_count += 1
+            continue
+
+        label_ids = cv2.imread(str(source_path), cv2.IMREAD_UNCHANGED)
+        if label_ids is None:
+            raise ValueError(f"OpenCV не удалось прочитать labelIds-маску: {source_path}")
+        if label_ids.ndim != 2 or label_ids.dtype != np.uint8:
+            raise ValueError(
+                f"Ожидалась одноканальная uint8 labelIds-маска, "
+                f"получено shape={label_ids.shape}, dtype={label_ids.dtype}: {source_path}"
+            )
+        train_ids = LABEL_ID_TO_TRAIN_ID[label_ids]
+        validate_mask(train_ids, source_path)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary = destination.with_name(destination.stem + ".tmp.png")
+        if not cv2.imwrite(str(temporary), train_ids):
+            raise OSError(f"Не удалось сохранить trainId-маску: {temporary}")
+        temporary.replace(destination)
+        converted_count += 1
+
+    prepared = sorted(output.rglob(f"*{MASK_SUFFIX}"))
+    if len(prepared) != len(label_id_masks):
+        raise ValueError(
+            f"Подготовлено {len(prepared)} из {len(label_id_masks)} trainId-масок в {output}"
+        )
+    print(
+        f"labelTrainIds готовы: {output} "
+        f"(создано {converted_count}, использовано из кэша {reused_count})"
+    )
+    return output
+
+
+def _path_for_manifest(path: Path, dataset_root: Path) -> str:
+    """Keep portable relative paths when possible, otherwise keep an absolute path."""
+    try:
+        return path.relative_to(dataset_root).as_posix()
+    except ValueError:
+        return str(path)
 
 
 def find_cityscapes_pairs(
@@ -114,8 +227,8 @@ def find_cityscapes_pairs(
         pairs.append(
             {
                 "image_id": image_id,
-                "image_path": image_path.relative_to(root).as_posix(),
-                "mask_path": mask_path.relative_to(root).as_posix(),
+                "image_path": _path_for_manifest(image_path, root),
+                "mask_path": _path_for_manifest(mask_path, root),
                 "city": city,
                 "sequence": sequence,
             }

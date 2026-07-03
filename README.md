@@ -30,6 +30,12 @@ source .venv/bin/activate
 `configs/experiment.yaml`. В каталоге данных ожидаются папки `leftImg8bit` и
 `gtFine`.
 
+В Google Colab notebook загружает набор командой
+`kagglehub.dataset_download("electraawais/cityscape-dataset")`, автоматически
+находит вложенные каталоги `leftImg8bit` и `gtFine`. Если в Kaggle-архиве есть
+только маски `*_gtFine_labelIds.png`, они один раз преобразуются в обязательные
+19-классовые `*_gtFine_labelTrainIds.png`; кэш сохраняется в Google Drive.
+
 ## Последовательность запуска
 
 Все команды выполняются из корня проекта.
