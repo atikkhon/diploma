@@ -28,7 +28,8 @@ from src.metrics import (
     update_confusion_matrix,
 )
 from src.tracking import flatten_parameters
-from src.train import create_grad_scaler
+from src.train import create_grad_scaler, train_model
+from src.visualization import colorize_mask
 
 
 @pytest.fixture()
@@ -269,6 +270,57 @@ def test_current_grad_scaler_api_has_no_deprecation_warning() -> None:
     assert not scaler.is_enabled()
     assert not any("deprecated" in str(item.message).lower() for item in caught), (
         "Создание GradScaler вызвало deprecation warning"
+    )
+
+
+def test_resume_completed_checkpoint_does_not_train_again(tmp_path: Path) -> None:
+    model = torch.nn.Conv2d(3, 19, kernel_size=1)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=0.0003)
+    scaler = create_grad_scaler(torch.device("cpu"), enabled=False)
+    checkpoint_dir = tmp_path / "checkpoints"
+    checkpoint_dir.mkdir()
+    checkpoint = {
+        "epoch": 8,
+        "model_name": "unet",
+        "model_state_dict": model.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "scaler_state_dict": scaler.state_dict(),
+        "best_miou": 0.25,
+        "config": {},
+    }
+    best_path = checkpoint_dir / "unet_best.pt"
+    last_path = checkpoint_dir / "unet_last.pt"
+    torch.save(checkpoint, best_path)
+    torch.save(checkpoint, last_path)
+    history_path = tmp_path / "training_history_unet.csv"
+    pd.DataFrame({"epoch": range(1, 9), "dev_miou": [0.25] * 8}).to_csv(
+        history_path, index=False
+    )
+
+    history, returned_best, returned_last = train_model(
+        model=model,
+        model_name="unet",
+        train_loader=[],
+        dev_loader=[],
+        optimizer=optimizer,
+        criterion=torch.nn.CrossEntropyLoss(ignore_index=255),
+        device=torch.device("cpu"),
+        epochs=8,
+        checkpoint_dir=checkpoint_dir,
+        history_path=history_path,
+        config={"training": {"log_interval": 1}},
+        resume_path=last_path,
+    )
+    assert len(history) == 8, "Resume потерял уже записанные строки истории"
+    assert returned_best == best_path
+    assert returned_last == last_path
+
+
+def test_cityscapes_preview_palette_handles_ignore_index() -> None:
+    colored = colorize_mask(torch.tensor([[0, 18, 255]], dtype=torch.int64))
+    assert colored.shape == (1, 3, 3)
+    assert colored[0, 2].tolist() == [0, 0, 0], (
+        "ignore_index=255 в preview должен отображаться чёрным"
     )
 
 

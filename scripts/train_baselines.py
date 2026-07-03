@@ -2,6 +2,7 @@
 
 import argparse
 import sys
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +35,24 @@ from src.utils import (  # noqa: E402
 BASELINE_MODELS = ["unet", "deeplabv3plus", "pspnet"]
 
 
+def checkpoint_epoch(path: Path, expected_model: str) -> int:
+    """Read and validate the completed epoch without constructing the model."""
+    try:
+        checkpoint = torch.load(path, map_location="cpu", weights_only=False)
+    except TypeError:
+        checkpoint = torch.load(path, map_location="cpu")
+    if not isinstance(checkpoint, dict):
+        raise ValueError(f"Некорректный checkpoint: {path}")
+    if "epoch" not in checkpoint or "model_name" not in checkpoint:
+        raise ValueError(f"В checkpoint нет epoch или model_name: {path}")
+    saved_model = str(checkpoint["model_name"]).lower()
+    if saved_model != expected_model.lower():
+        raise ValueError(
+            f"В {path} сохранена модель {saved_model}, ожидалась {expected_model}"
+        )
+    return int(checkpoint["epoch"])
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default="configs/experiment.yaml")
@@ -42,6 +61,14 @@ def parse_args() -> argparse.Namespace:
         nargs="+",
         choices=BASELINE_MODELS,
         help="Обучить только указанные модели; по умолчанию обучаются все",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help=(
+            "Продолжить каждую выбранную модель из <model>_last.pt. "
+            "Если checkpoint отсутствует, начать с первой эпохи."
+        ),
     )
     return parser.parse_args()
 
@@ -127,6 +154,7 @@ def create_loaders(
 def train_baselines(
     config_path: str | Path,
     model_names: list[str] | None = None,
+    resume: bool = False,
 ) -> None:
     config_file = Path(config_path).expanduser().resolve()
     config = load_yaml(config_file)
@@ -160,17 +188,65 @@ def train_baselines(
     for model_name in selected_models:
         history_path = history_dir / f"training_history_{model_name}.csv"
         run_id_path = history_dir / f"mlflow_run_id_{model_name}.txt"
+        resume_path = checkpoint_dir / f"{model_name}_last.pt"
+        selected_resume_path: Path | None = None
+        existing_run_id: str | None = None
+        if resume:
+            if resume_path.is_file():
+                selected_resume_path = resume_path
+                completed_epoch = checkpoint_epoch(resume_path, model_name)
+                print(
+                    f"[{model_name}] найден checkpoint для resume: {resume_path} "
+                    f"(epoch {completed_epoch})",
+                    flush=True,
+                )
+                if completed_epoch >= int(training["epochs"]):
+                    best_path = checkpoint_dir / f"{model_name}_best.pt"
+                    missing_outputs = [
+                        path
+                        for path in (best_path, history_path)
+                        if not path.is_file()
+                    ]
+                    if missing_outputs:
+                        raise FileNotFoundError(
+                            "Last checkpoint завершён, но отсутствуют обязательные "
+                            "результаты: "
+                            + ", ".join(map(str, missing_outputs))
+                        )
+                    print(
+                        f"[{model_name}] обучение уже завершено "
+                        f"({completed_epoch}/{training['epochs']}); "
+                        "повторный запуск не требуется.",
+                        flush=True,
+                    )
+                    continue
+                if run_id_path.is_file():
+                    existing_run_id = run_id_path.read_text(
+                        encoding="utf-8"
+                    ).strip() or None
+            else:
+                print(
+                    f"[{model_name}] checkpoint для resume не найден; "
+                    "обучение начнётся с эпохи 1.",
+                    flush=True,
+                )
 
-        print(f"Подготовка модели {model_name}...", flush=True)
+        print(f"[{model_name}] 1/4: фиксация seed и создание DataLoader...", flush=True)
         seed_everything(seed)
         train_loader, dev_loader = create_loaders(config, project_root, seed)
+        print(
+            f"[{model_name}] 2/4: создание модели "
+            f"{model_config.get('encoder', 'resnet34')} "
+            f"(веса {model_config.get('encoder_weights', 'imagenet')})...",
+            flush=True,
+        )
         model = create_model(
             model_name,
             classes=int(data["num_classes"]),
             encoder_name=str(model_config.get("encoder", "resnet34")),
             encoder_weights=model_config.get("encoder_weights", "imagenet"),
         ).to(device)
-        print(f"Модель {model_name} загружена на {device}", flush=True)
+        print(f"[{model_name}] 3/4: модель загружена на {device}", flush=True)
         optimizer = AdamW(
             model.parameters(),
             lr=float(training["learning_rate"]),
@@ -200,11 +276,13 @@ def train_baselines(
             "source": "training",
             "status": "running",
         }
+        print(f"[{model_name}] 4/4: запуск обучения...", flush=True)
         with mlflow_run(
             experiment_name,
             run_name,
             run_parameters,
             run_id_path=run_id_path,
+            existing_run_id=existing_run_id,
             tags=tags,
         ) as mlflow_module:
             _, best_path, last_path = train_model(
@@ -225,6 +303,7 @@ def train_baselines(
                 on_epoch_end=lambda row, epoch: log_metrics_safe(
                     mlflow_module, row, epoch
                 ),
+                resume_path=selected_resume_path,
             )
             for artifact in (history_path, best_path, last_path, environment_path):
                 log_artifact_safe(mlflow_module, artifact)
@@ -242,7 +321,7 @@ def train_baselines(
 def main() -> None:
     args = parse_args()
     try:
-        train_baselines(args.config, args.models)
+        train_baselines(args.config, args.models, resume=args.resume)
     except (FileNotFoundError, ValueError, RuntimeError, OSError) as error:
         raise SystemExit(f"Ошибка обучения: {error}") from error
 

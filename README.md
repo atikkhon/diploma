@@ -4,8 +4,8 @@
 семантической сегментации. Модели создаются через
 `segmentation_models_pytorch`, эксперименты отслеживаются в MLflow.
 
-Сейчас Python-файлы содержат только docstring с описанием назначения. Логику
-следует добавлять постепенно, сохраняя простой скриптовый интерфейс.
+Обучение, возобновление из checkpoint и визуальная проверка запускаются
+обычными Python-скриптами.
 
 ## Установка
 
@@ -46,6 +46,12 @@ python scripts/create_split.py --config configs/experiment.yaml
 
 # 2. Обучить базовые модели.
 python scripts/train_baselines.py --config configs/experiment.yaml
+
+# Продолжить модель из last checkpoint; без него обучение начнётся с epoch 1.
+python -u scripts/train_baselines.py --config configs/experiment.yaml --models pspnet --resume
+
+# Сразу проверить best checkpoint на одном internal-dev изображении.
+python scripts/visualize_checkpoint.py --config configs/experiment.yaml --model pspnet --index 0
 
 # 3. Оценить модели на чистой официальной validation-выборке.
 python scripts/evaluate_clean.py --config configs/experiment.yaml
@@ -95,7 +101,8 @@ python scripts/backfill_mlflow.py --config configs/experiment.yaml --model unet
 - `outputs/metrics/clean_per_class_iou.csv` — IoU 19 классов;
 - `outputs/metrics/confusion_matrix_<model>.csv` — общая confusion matrix;
 - `outputs/metrics/resource_summary.csv` — inference time, параметры и GPU memory;
-- `outputs/figures/` — графики и иллюстрации;
+- `outputs/figures/` — графики и иллюстрации, включая
+  `segmentation_preview_<model>.png` с ground truth и prediction;
 - `outputs/tables/` — итоговые таблицы;
 - `outputs/predictions/` — примеры предсказаний;
 - `mlflow.db` — SQLite metadata MLflow;

@@ -2,6 +2,7 @@
 
 import math
 import time
+import warnings
 from pathlib import Path
 from typing import Any, Callable
 
@@ -194,8 +195,9 @@ def train_model(
     num_classes: int = 19,
     ignore_index: int = 255,
     on_epoch_end: Callable[[dict[str, float], int], None] | None = None,
+    resume_path: str | Path | None = None,
 ) -> tuple[pd.DataFrame, Path, Path]:
-    """Run all epochs, saving CSV after each epoch plus best/last checkpoints."""
+    """Run or resume training, saving CSV and best/last checkpoints."""
     if epochs <= 0:
         raise ValueError("Число эпох должно быть положительным")
     checkpoint_directory = Path(checkpoint_dir)
@@ -213,7 +215,83 @@ def train_model(
     if log_interval <= 0:
         raise ValueError("training.log_interval должен быть положительным")
 
-    for epoch in range(1, epochs + 1):
+    start_epoch = 1
+    resume_file = Path(resume_path) if resume_path is not None else None
+    if resume_file is not None:
+        if not resume_file.is_file():
+            raise FileNotFoundError(f"Checkpoint для resume не найден: {resume_file}")
+        try:
+            checkpoint = torch.load(
+                resume_file, map_location=device, weights_only=False
+            )
+        except TypeError:  # PyTorch < 2.0 has no weights_only argument.
+            checkpoint = torch.load(resume_file, map_location=device)
+        required_keys = {
+            "epoch",
+            "model_name",
+            "model_state_dict",
+            "optimizer_state_dict",
+        }
+        missing_keys = required_keys - set(checkpoint)
+        if missing_keys:
+            raise ValueError(
+                f"Checkpoint {resume_file} не содержит поля: {sorted(missing_keys)}"
+            )
+        if str(checkpoint["model_name"]).lower() != model_name.lower():
+            raise ValueError(
+                f"Checkpoint предназначен для {checkpoint['model_name']}, "
+                f"а запрошена модель {model_name}"
+            )
+
+        model.load_state_dict(checkpoint["model_state_dict"])
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        scaler_state = checkpoint.get("scaler_state_dict")
+        if scaler_state:
+            scaler.load_state_dict(scaler_state)
+        best_miou = float(checkpoint.get("best_miou", -math.inf))
+        completed_epoch = int(checkpoint["epoch"])
+        if completed_epoch < 0:
+            raise ValueError(
+                f"В checkpoint указана неверная эпоха: {completed_epoch}"
+            )
+        start_epoch = completed_epoch + 1
+
+        if history_file.is_file():
+            previous_history = pd.read_csv(history_file)
+            if "epoch" not in previous_history.columns:
+                raise ValueError(
+                    f"В истории обучения нет столбца epoch: {history_file}"
+                )
+            previous_history = previous_history.loc[
+                previous_history["epoch"] <= completed_epoch
+            ]
+            history_rows = previous_history.to_dict(orient="records")
+        else:
+            warnings.warn(
+                f"CSV истории не найден: {history_file}. "
+                "Resume продолжится, но CSV будет содержать только новые эпохи.",
+                RuntimeWarning,
+            )
+        print(
+            f"[{model_name}] resume из {resume_file}: "
+            f"завершена эпоха {completed_epoch}, следующая {start_epoch}",
+            flush=True,
+        )
+
+    if start_epoch > epochs:
+        if not best_path.is_file():
+            raise FileNotFoundError(
+                f"Обучение дошло до эпохи {epochs}, но best checkpoint отсутствует: "
+                f"{best_path}"
+            )
+        print(
+            f"[{model_name}] уже завершено: checkpoint содержит эпоху "
+            f"{start_epoch - 1}/{epochs}. Повторное обучение не требуется.",
+            flush=True,
+        )
+        return pd.DataFrame(history_rows), best_path, resume_file or last_path
+
+    for epoch in range(start_epoch, epochs + 1):
         if device.type == "cuda":
             torch.cuda.reset_peak_memory_stats(device)
         started_at = time.perf_counter()
