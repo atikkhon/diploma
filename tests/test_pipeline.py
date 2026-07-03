@@ -12,6 +12,11 @@ import torch.nn.functional as functional
 
 from scripts.create_split import validate_manifest
 from scripts.evaluate_clean import require_official_val_path, save_confusion_matrix
+from scripts.evaluate_corruptions import (
+    EXPECTED_CONDITION_COUNT,
+    build_robustness_summary,
+    validate_complete_results,
+)
 from src.corruptions import (
     CORRUPTION_MANIFEST_COLUMNS,
     CORRUPTION_NAMES,
@@ -491,6 +496,82 @@ def test_corruption_manifest_contains_references_not_cached_images(
     assert not any("corrupted" in column for column in manifest.columns), (
         "Manifest не должен ссылаться на сохранённые копии corrupted-изображений"
     )
+
+
+def make_complete_corruption_results(
+    model_values: dict[str, dict[str, float]],
+) -> pd.DataFrame:
+    rows = []
+    family_by_corruption = {
+        "darkness": "lighting",
+        "contrast": "lighting",
+        "gaussian_blur": "blur",
+        "motion_blur": "blur",
+        "gaussian_noise": "noise",
+        "impulse_noise": "noise",
+        "jpeg": "digital",
+        "fog": "weather",
+    }
+    for model_name, values in model_values.items():
+        clean_miou = values["clean"]
+        rows.append(
+            {
+                "model": model_name,
+                "corruption": "clean",
+                "family": "clean",
+                "severity": 0,
+                "miou": clean_miou,
+                "macro_dice": clean_miou,
+                "delta_miou": 0.0,
+                "retention": 1.0,
+                "total_inference_seconds": 0.5,
+                "mean_inference_ms_per_image": 1.0,
+                "peak_gpu_memory_mb": values["memory"],
+            }
+        )
+        for corruption in CORRUPTION_NAMES:
+            for severity in SEVERITY_LEVELS:
+                miou = values["corrupted"]
+                rows.append(
+                    {
+                        "model": model_name,
+                        "corruption": corruption,
+                        "family": family_by_corruption[corruption],
+                        "severity": severity,
+                        "miou": miou,
+                        "macro_dice": miou,
+                        "delta_miou": clean_miou - miou,
+                        "retention": miou / clean_miou,
+                        "total_inference_seconds": 0.5,
+                        "mean_inference_ms_per_image": 1.0,
+                        "peak_gpu_memory_mb": values["memory"],
+                    }
+                )
+    return pd.DataFrame(rows)
+
+
+def test_robustness_summary_and_fixed_selection_order() -> None:
+    results = make_complete_corruption_results(
+        {
+            "unet": {"clean": 0.70, "corrupted": 0.50, "memory": 900.0},
+            "deeplabv3plus": {
+                "clean": 0.90,
+                "corrupted": 0.49,
+                "memory": 800.0,
+            },
+            "pspnet": {"clean": 0.70, "corrupted": 0.50, "memory": 1000.0},
+        }
+    )
+    validate_complete_results(results)
+    assert len(results) == 3 * EXPECTED_CONDITION_COUNT
+    summary = build_robustness_summary(
+        results, ["lighting", "blur", "noise", "digital", "weather"]
+    )
+    # Primary robustness beats a larger clean score; the final tie uses memory.
+    assert summary["model"].tolist() == ["unet", "pspnet", "deeplabv3plus"]
+    assert summary.loc[0, "is_best_model"]
+    assert summary.loc[0, "mean_corrupted_miou"] == pytest.approx(0.50)
+    assert summary.loc[0, "family_noise_miou"] == pytest.approx(0.50)
 
 
 def test_tracking_parameters_are_flattened() -> None:

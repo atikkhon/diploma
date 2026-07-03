@@ -106,10 +106,18 @@ python scripts/backfill_mlflow.py --config configs/experiment.yaml --model unet
 - `outputs/metrics/resource_summary.csv` — inference time, параметры и GPU memory;
 - `outputs/metrics/corruption_manifest.csv` — ссылки на clean-пары, corruption,
   severity и детерминированный SHA256 seed;
+- `outputs/metrics/corruption_results.csv` — clean и 24 corruption-условия для
+  каждой модели; `delta_miou = clean_miou - corrupted_miou`;
+- `outputs/metrics/corruption_per_class.csv` — IoU 19 классов для каждого условия;
+- `outputs/metrics/robustness_summary.csv` — агрегаты, robustness rank и выбранная
+  лучшая модель;
 - `outputs/figures/` — графики и иллюстрации, включая
   `segmentation_preview_<model>.png` с ground truth и prediction;
 - `outputs/figures/corruption_examples.png` — clean и три severity для каждого
   из восьми искажений;
+- `outputs/figures/robustness_heatmap.png`, `degradation_curves.png`,
+  `retention_comparison.png`, `corruption_family_comparison.png` и
+  `worst_case_comparison.png` — графики из corruption CSV;
 - `outputs/tables/` — итоговые таблицы;
 - `outputs/predictions/` — примеры предсказаний;
 - `mlflow.db` — SQLite metadata MLflow;

@@ -361,8 +361,25 @@ class CityscapesDataset(Dataset):
                 "Для dev/val используется только фиксированное преобразование "
                 "без случайных аугментаций"
             )
-        self.transform = transform or build_transform(train, width, height)
         self.image_corruption = image_corruption
+        self.transform = transform or build_transform(train, width, height)
+        self.corruption_resize = None
+        self.corruption_normalize = None
+        if image_corruption is not None:
+            # Corruption parameters are defined at the model input resolution.
+            # The mask participates only in deterministic nearest-neighbour resize.
+            self.corruption_resize = A.Resize(
+                height=height,
+                width=width,
+                interpolation=cv2.INTER_LINEAR,
+                mask_interpolation=cv2.INTER_NEAREST,
+            )
+            self.corruption_normalize = A.Compose(
+                [
+                    A.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
+                    ToTensorV2(),
+                ]
+            )
 
     def __len__(self) -> int:
         return len(self.rows)
@@ -379,17 +396,6 @@ class CityscapesDataset(Dataset):
         if image_bgr is None:
             raise ValueError(f"OpenCV не удалось прочитать изображение: {image_path}")
         image = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
-        if self.image_corruption is not None:
-            image = self.image_corruption(image.copy(), image_id)
-            if not isinstance(image, np.ndarray):
-                raise TypeError(
-                    f"Corruption для image_id={image_id} вернул не NumPy-массив"
-                )
-            if image.dtype != np.uint8 or image.ndim != 3 or image.shape[2] != 3:
-                raise ValueError(
-                    "Corruption должен вернуть RGB uint8 H×W×3 до нормализации, "
-                    f"получено shape={image.shape}, dtype={image.dtype}"
-                )
         # create_split.py already validates every full-resolution mask once.
         # Repeating np.unique over 2048x1024 pixels here would stall every epoch.
         mask = read_mask(mask_path, validate_values=False)
@@ -399,7 +405,33 @@ class CityscapesDataset(Dataset):
                 f"не совпадают для image_id={image_id}"
             )
 
-        transformed = self.transform(image=image, mask=mask)
+        if self.image_corruption is not None:
+            if self.corruption_resize is None or self.corruption_normalize is None:
+                raise RuntimeError("Внутренние corruption-преобразования не созданы")
+            resized = self.corruption_resize(image=image, mask=mask)
+            corrupted_image = self.image_corruption(
+                resized["image"].copy(), image_id
+            )
+            if not isinstance(corrupted_image, np.ndarray):
+                raise TypeError(
+                    f"Corruption для image_id={image_id} вернул не NumPy-массив"
+                )
+            if (
+                corrupted_image.dtype != np.uint8
+                or corrupted_image.ndim != 3
+                or corrupted_image.shape[2] != 3
+            ):
+                raise ValueError(
+                    "Corruption должен вернуть RGB uint8 H×W×3 до нормализации, "
+                    f"получено shape={corrupted_image.shape}, "
+                    f"dtype={corrupted_image.dtype}"
+                )
+            transformed = self.corruption_normalize(
+                image=corrupted_image,
+                mask=resized["mask"],
+            )
+        else:
+            transformed = self.transform(image=image, mask=mask)
         output_mask = transformed["mask"]
         if not isinstance(output_mask, torch.Tensor):
             output_mask = torch.as_tensor(output_mask)
