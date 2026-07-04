@@ -17,6 +17,11 @@ from scripts.evaluate_corruptions import (
     build_robustness_summary,
     validate_complete_results,
 )
+from scripts.train_robust import (
+    build_robust_comparison,
+    build_seen_unseen_comparison,
+    select_model_from_summary,
+)
 from src.corruptions import (
     CORRUPTION_MANIFEST_COLUMNS,
     CORRUPTION_NAMES,
@@ -45,6 +50,13 @@ from src.metrics import (
 from src.tracking import flatten_parameters
 from src.train import create_grad_scaler, train_model
 from src.visualization import colorize_mask
+from src.robust_augmentation import (
+    DEFAULT_ROBUST_POLICY,
+    DEFAULT_SEEN_CORRUPTIONS,
+    DEFAULT_UNSEEN_CORRUPTIONS,
+    RobustTrainingTransform,
+    validate_robust_policy,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -572,6 +584,87 @@ def test_robustness_summary_and_fixed_selection_order() -> None:
     assert summary.loc[0, "is_best_model"]
     assert summary.loc[0, "mean_corrupted_miou"] == pytest.approx(0.50)
     assert summary.loc[0, "family_noise_miou"] == pytest.approx(0.50)
+
+
+def test_robust_model_is_read_from_robustness_summary(tmp_path: Path) -> None:
+    summary_path = tmp_path / "robustness_summary.csv"
+    pd.DataFrame(
+        [
+            {
+                "model": model_name,
+                "mean_corrupted_miou": 0.5,
+                "clean_miou": 0.6,
+                "worst_case_miou": 0.4,
+                "peak_gpu_memory_mb": 1000.0,
+                "robustness_rank": rank,
+            }
+            for model_name, rank in (
+                ("unet", 2),
+                ("deeplabv3plus", 1),
+                ("pspnet", 3),
+            )
+        ]
+    ).to_csv(summary_path, index=False)
+    assert select_model_from_summary(summary_path) == "deeplabv3plus"
+
+
+def test_robust_augmentation_is_deterministic_and_preserves_mask_values() -> None:
+    validate_robust_policy(DEFAULT_ROBUST_POLICY)
+    assert float(DEFAULT_ROBUST_POLICY["brightness_contrast_probability"]) <= 0.5
+    assert float(DEFAULT_ROBUST_POLICY["heavy_corruption_probability"]) <= 0.5
+    rng = np.random.default_rng(7)
+    image = rng.integers(0, 256, size=(24, 48, 3), dtype=np.uint8)
+    mask = np.zeros((24, 48), dtype=np.uint8)
+    mask[:, 12:24] = 1
+    mask[:, 24:36] = 18
+    mask[:, 36:] = 255
+    transform = RobustTrainingTransform(384, 192, DEFAULT_ROBUST_POLICY)
+
+    np.random.seed(42)
+    first = transform(image.copy(), mask.copy())
+    np.random.seed(42)
+    second = transform(image.copy(), mask.copy())
+    assert torch.equal(first["image"], second["image"]), (
+        "Robust augmentation не воспроизводится при одинаковом seed"
+    )
+    assert np.array_equal(first["mask"], second["mask"])
+    assert tuple(first["image"].shape) == (3, 192, 384)
+    assert first["image"].dtype == torch.float32
+    assert first["mask"].shape == (192, 384)
+    assert set(np.unique(first["mask"])) == {0, 1, 18, 255}, (
+        "Robust resize создал промежуточные значения segmentation mask"
+    )
+
+
+def test_seen_unseen_groups_and_comparison_are_complete() -> None:
+    baseline = make_complete_corruption_results(
+        {
+            "unet": {"clean": 0.70, "corrupted": 0.50, "memory": 900.0},
+            "deeplabv3plus": {
+                "clean": 0.69,
+                "corrupted": 0.48,
+                "memory": 950.0,
+            },
+            "pspnet": {"clean": 0.68, "corrupted": 0.47, "memory": 920.0},
+        }
+    )
+    for column in ("pixel_accuracy", "checkpoint"):
+        baseline[column] = 0.6 if column == "pixel_accuracy" else "baseline.pt"
+    robust = baseline.loc[baseline["model"] == "unet"].copy()
+    robust["model"] = "robust_unet"
+    robust["miou"] += 0.02
+    robust["macro_dice"] += 0.02
+    robust["pixel_accuracy"] += 0.01
+    robust["checkpoint"] = "robust_unet_best.pt"
+    comparison = build_robust_comparison(baseline, robust, "unet")
+    grouped = build_seen_unseen_comparison(
+        comparison,
+        DEFAULT_SEEN_CORRUPTIONS,
+        DEFAULT_UNSEEN_CORRUPTIONS,
+    )
+    assert len(comparison) == 25
+    assert grouped["group"].tolist() == ["seen", "unseen"]
+    assert grouped["condition_count"].tolist() == [15, 9]
 
 
 def test_tracking_parameters_are_flattened() -> None:

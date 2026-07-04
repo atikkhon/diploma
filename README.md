@@ -62,8 +62,8 @@ python scripts/create_corruption_assets.py --config configs/experiment.yaml --co
 # 4. Оценить устойчивость к искажениям.
 python scripts/evaluate_corruptions.py --config configs/experiment.yaml --corruptions configs/corruptions.yaml
 
-# 5. Указать лучшую модель в robust_training.model_name и обучить её с аугментациями.
-python scripts/train_robust.py --config configs/experiment.yaml --corruptions configs/corruptions.yaml
+# 5. Автоматически взять rank=1 из robustness_summary.csv, обучить и оценить robust-вариант.
+python -u scripts/train_robust.py --config configs/experiment.yaml --corruptions configs/corruptions.yaml --resume
 
 # 6. Построить таблицы и рисунки из сохранённых результатов.
 python scripts/build_report_assets.py --config configs/experiment.yaml
@@ -111,6 +111,11 @@ python scripts/backfill_mlflow.py --config configs/experiment.yaml --model unet
 - `outputs/metrics/corruption_per_class.csv` — IoU 19 классов для каждого условия;
 - `outputs/metrics/robustness_summary.csv` — агрегаты, robustness rank и выбранная
   лучшая модель;
+- `outputs/metrics/robust_training_history.csv` — восемь эпох robust retraining;
+- `outputs/metrics/robust_comparison.csv` — baseline и robust для clean и всех
+  24 corruption-условий выбранной архитектуры;
+- `outputs/metrics/seen_unseen_comparison.csv` — отдельные средние для seen и
+  unseen corruptions;
 - `outputs/figures/` — графики и иллюстрации, включая
   `segmentation_preview_<model>.png` с ground truth и prediction;
 - `outputs/figures/corruption_examples.png` — clean и три severity для каждого
@@ -118,6 +123,8 @@ python scripts/backfill_mlflow.py --config configs/experiment.yaml --model unet
 - `outputs/figures/robustness_heatmap.png`, `degradation_curves.png`,
   `retention_comparison.png`, `corruption_family_comparison.png` и
   `worst_case_comparison.png` — графики из corruption CSV;
+- `outputs/figures/baseline_vs_robust.png`, `seen_unseen.png` и
+  `clean_robust_tradeoff.png` — сравнение двух вариантов выбранной архитектуры;
 - `outputs/tables/` — итоговые таблицы;
 - `outputs/predictions/` — примеры предсказаний;
 - `mlflow.db` — SQLite metadata MLflow;
