@@ -150,16 +150,13 @@ def create_manifest(
 
 def main() -> None:
     args = parse_args()
-    try:
-        config, config_path = load_config(args.config)
-        create_manifest(
-            config,
-            config_path,
-            args.output,
-            skip_mask_validation=args.skip_mask_validation,
-        )
-    except (FileNotFoundError, ValueError, OSError) as error:
-        raise SystemExit(f"Ошибка: {error}") from error
+    config, config_path = load_config(args.config)
+    create_manifest(
+        config,
+        config_path,
+        args.output,
+        skip_mask_validation=args.skip_mask_validation,
+    )
 
 
 if __name__ == "__main__":

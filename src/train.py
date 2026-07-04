@@ -2,7 +2,6 @@
 
 import math
 import time
-import warnings
 from pathlib import Path
 from typing import Any, Callable
 
@@ -24,11 +23,8 @@ def _mixed_precision_enabled(device: torch.device, requested: bool) -> bool:
 
 
 def create_grad_scaler(device: torch.device, enabled: bool) -> Any:
-    """Create a GradScaler with the current API and a fallback for old PyTorch."""
-    try:
-        return torch.amp.GradScaler(device.type, enabled=enabled)
-    except (AttributeError, TypeError):
-        return torch.cuda.amp.GradScaler(enabled=enabled)
+    """Create a GradScaler with the current PyTorch API."""
+    return torch.amp.GradScaler(device.type, enabled=enabled)
 
 
 def train_one_epoch(
@@ -204,8 +200,8 @@ def train_model(
     checkpoint_directory.mkdir(parents=True, exist_ok=True)
     history_file = Path(history_path)
     history_file.parent.mkdir(parents=True, exist_ok=True)
-    best_path = checkpoint_directory / f"{model_name}_best.pt"
-    last_path = checkpoint_directory / f"{model_name}_last.pt"
+    best_path = checkpoint_directory / "best.pt"
+    last_path = checkpoint_directory / "last.pt"
 
     amp_enabled = _mixed_precision_enabled(device, use_amp)
     scaler = create_grad_scaler(device, amp_enabled)
@@ -220,12 +216,9 @@ def train_model(
     if resume_file is not None:
         if not resume_file.is_file():
             raise FileNotFoundError(f"Checkpoint для resume не найден: {resume_file}")
-        try:
-            checkpoint = torch.load(
-                resume_file, map_location=device, weights_only=False
-            )
-        except TypeError:  # PyTorch < 2.0 has no weights_only argument.
-            checkpoint = torch.load(resume_file, map_location=device)
+        checkpoint = torch.load(
+            resume_file, map_location=device, weights_only=False
+        )
         required_keys = {
             "epoch",
             "model_name",
@@ -267,10 +260,8 @@ def train_model(
             ]
             history_rows = previous_history.to_dict(orient="records")
         else:
-            warnings.warn(
-                f"CSV истории не найден: {history_file}. "
-                "Resume продолжится, но CSV будет содержать только новые эпохи.",
-                RuntimeWarning,
+            raise FileNotFoundError(
+                f"Для resume необходим CSV истории: {history_file}"
             )
         print(
             f"[{model_name}] resume из {resume_file}: "

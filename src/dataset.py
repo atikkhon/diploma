@@ -162,10 +162,9 @@ def prepare_train_id_masks(
 
 def _path_for_manifest(path: Path, dataset_root: Path) -> str:
     """Keep portable relative paths when possible, otherwise keep an absolute path."""
-    try:
+    if path.is_relative_to(dataset_root):
         return path.relative_to(dataset_root).as_posix()
-    except ValueError:
-        return str(path)
+    return str(path)
 
 
 def find_cityscapes_pairs(

@@ -24,6 +24,7 @@ mlruns/
 mlflow.db
 mlflow.db-*
 mlartifacts/
+runs/
 
 # Generated results
 outputs/metrics/*

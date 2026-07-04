@@ -156,10 +156,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    try:
-        smoke_test_dataset(args.config, args.split, args.output)
-    except (FileNotFoundError, ValueError, OSError) as error:
-        raise SystemExit(f"Ошибка smoke test: {error}") from error
+    smoke_test_dataset(args.config, args.split, args.output)
 
 
 if __name__ == "__main__":

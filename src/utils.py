@@ -43,15 +43,12 @@ def make_dataloader_generator(seed: int = 42) -> torch.Generator:
 
 
 def load_yaml(path: str | Path) -> dict[str, Any]:
-    """Read a YAML mapping and report missing or malformed files clearly."""
+    """Read a YAML mapping."""
     config_path = Path(path).expanduser().resolve()
     if not config_path.is_file():
         raise FileNotFoundError(f"YAML-конфигурация не найдена: {config_path}")
-    try:
-        with config_path.open("r", encoding="utf-8") as file:
-            config = yaml.safe_load(file)
-    except yaml.YAMLError as error:
-        raise ValueError(f"Некорректный YAML в {config_path}: {error}") from error
+    with config_path.open("r", encoding="utf-8") as file:
+        config = yaml.safe_load(file)
     if not isinstance(config, dict):
         raise ValueError(f"В корне YAML должен быть словарь: {config_path}")
     return config
@@ -79,8 +76,7 @@ def select_device(value: str = "auto") -> torch.device:
 
 def environment_info() -> dict[str, Any]:
     """Return JSON-serializable software and GPU information."""
-    packages = {}
-    for package in (
+    package_names = (
         "torch",
         "torchvision",
         "segmentation-models-pytorch",
@@ -88,11 +84,8 @@ def environment_info() -> dict[str, Any]:
         "opencv-python-headless",
         "pandas",
         "mlflow",
-    ):
-        try:
-            packages[package] = metadata.version(package)
-        except metadata.PackageNotFoundError:
-            packages[package] = None
+    )
+    packages = {package: metadata.version(package) for package in package_names}
     gpu_names = [
         torch.cuda.get_device_name(index) for index in range(torch.cuda.device_count())
     ]

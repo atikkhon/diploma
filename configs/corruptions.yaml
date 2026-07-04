@@ -1,59 +1,9 @@
-# Fixed corruption protocol. Do not tune these values on official validation data.
+# Darkness benchmark. Select one level manually for each evaluation.
 severity_levels: [1, 2, 3]
 
 corruptions:
   darkness:
-    family: lighting
     levels:
       1: {factor: 0.75}
       2: {factor: 0.55}
       3: {factor: 0.35}
-
-  contrast:
-    family: lighting
-    levels:
-      1: {factor: 0.80}
-      2: {factor: 0.60}
-      3: {factor: 0.40}
-
-  gaussian_blur:
-    family: blur
-    levels:
-      1: {kernel_size: 5, sigma: 1.0}
-      2: {kernel_size: 9, sigma: 2.0}
-      3: {kernel_size: 13, sigma: 3.0}
-
-  motion_blur:
-    family: blur
-    levels:
-      1: {kernel_size: 7}
-      2: {kernel_size: 15}
-      3: {kernel_size: 25}
-
-  gaussian_noise:
-    family: noise
-    levels:
-      1: {sigma: 8.0}
-      2: {sigma: 16.0}
-      3: {sigma: 28.0}
-
-  impulse_noise:
-    family: noise
-    levels:
-      1: {probability: 0.005}
-      2: {probability: 0.015}
-      3: {probability: 0.030}
-
-  jpeg:
-    family: digital
-    levels:
-      1: {quality: 70}
-      2: {quality: 40}
-      3: {quality: 15}
-
-  fog:
-    family: weather
-    levels:
-      1: {alpha: 0.15}
-      2: {alpha: 0.30}
-      3: {alpha: 0.45}

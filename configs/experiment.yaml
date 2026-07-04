@@ -15,12 +15,13 @@ data:
   image_width: 384
   image_height: 192
 
-models:
-  names:
-    - unet
-    - deeplabv3plus
-    - pspnet
-  encoder: resnet34
+run:
+  name: unet_example
+  output_dir: runs/unet_example
+
+model:
+  name: unet
+  encoder_name: resnet34
   encoder_weights: imagenet
 
 training:
@@ -42,30 +43,13 @@ evaluation:
   figures_dir: outputs/figures
   predictions_dir: outputs/predictions
 
-robust_training:
-  enabled: true
-  selection_file: outputs/metrics/robustness_summary.csv
-  seen_corruptions:
-    - darkness
-    - contrast
-    - gaussian_blur
-    - gaussian_noise
-    - jpeg
-  unseen_corruptions:
-    - motion_blur
-    - impulse_noise
-    - fog
-  augmentation:
-    horizontal_flip_probability: 0.5
-    brightness_contrast_probability: 0.3
-    brightness_factor_range: [0.80, 1.20]
-    contrast_factor_range: [0.80, 1.20]
-    heavy_corruption_probability: 0.3
-    gaussian_blur_kernel_sizes: [3, 5, 7]
-    gaussian_blur_sigma_range: [0.5, 1.5]
-    gaussian_noise_sigma_range: [4.0, 12.0]
-    jpeg_quality_range: [60, 90]
-
 tracking:
   # Set MLFLOW_TRACKING_URI in the environment when a custom URI is needed.
-  experiment_name: cityscapes_robustness
+  experiment_name: cityscapes_unet
+
+corruptions:
+  darkness:
+    levels:
+      1: {factor: 0.75}
+      2: {factor: 0.55}
+      3: {factor: 0.35}

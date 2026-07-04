@@ -1,9 +1,10 @@
-"""Visualize one best checkpoint on a deterministic internal-dev image."""
+"""Visualize one run on a selected internal-dev image."""
 
 import argparse
 import sys
 from pathlib import Path
 
+import mlflow
 import torch
 
 
@@ -11,106 +12,78 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from src.corruptions import darkness_transform  # noqa: E402
 from src.dataset import CityscapesDataset  # noqa: E402
+from src.experiment import load_run  # noqa: E402
 from src.models import create_model  # noqa: E402
-from src.utils import load_yaml, resolve_path, select_device  # noqa: E402
+from src.tracking import configure_mlflow, read_run_id  # noqa: E402
+from src.utils import resolve_path, select_device  # noqa: E402
 from src.visualization import save_segmentation_preview  # noqa: E402
-
-
-MODEL_NAMES = ("unet", "deeplabv3plus", "pspnet")
-
-
-def load_checkpoint(path: Path, device: torch.device) -> dict:
-    """Load a training checkpoint with clear validation errors."""
-    if not path.is_file():
-        raise FileNotFoundError(
-            f"Best checkpoint не найден: {path}. Сначала обучите эту модель."
-        )
-    try:
-        checkpoint = torch.load(path, map_location=device, weights_only=False)
-    except TypeError:
-        checkpoint = torch.load(path, map_location=device)
-    if not isinstance(checkpoint, dict) or "model_state_dict" not in checkpoint:
-        raise ValueError(f"Файл не является checkpoint проекта: {path}")
-    return checkpoint
 
 
 def visualize_checkpoint(
     config_path: str | Path,
-    model_name: str,
-    index: int = 0,
-    output_path: str | Path | None = None,
+    index: int,
+    condition: str = "clean",
+    severity: int | None = None,
 ) -> Path:
-    """Run one prediction on internal dev and save a four-panel PNG."""
-    config_file = Path(config_path).expanduser().resolve()
-    config = load_yaml(config_file)
-    project_root = config_file.parent.parent
-    data = config.get("data", {})
-    models = config.get("models", {})
-    training = config.get("training", {})
-    normalized_name = model_name.lower()
-    if normalized_name not in MODEL_NAMES:
-        raise ValueError(f"model должен быть одним из: {', '.join(MODEL_NAMES)}")
+    config, project_root, paths = load_run(config_path)
+    paths.create()
+    if condition == "darkness" and severity not in {1, 2, 3}:
+        raise ValueError("Для darkness выберите severity 1, 2 или 3")
+    if condition not in {"clean", "darkness"}:
+        raise ValueError("condition должен быть clean или darkness")
 
+    image_corruption = None
+    suffix = "clean"
+    if condition == "darkness":
+        factor = float(config["corruptions"]["darkness"]["levels"][severity]["factor"])
+        image_corruption = darkness_transform(factor)
+        suffix = f"darkness_s{severity}"
+
+    data = config["data"]
     dataset = CityscapesDataset(
         manifest_path=resolve_path(data["split_file"], project_root),
         dataset_root=resolve_path(data["root"], project_root),
         split="dev",
         train=False,
-        width=int(data.get("image_width", 384)),
-        height=int(data.get("image_height", 192)),
+        width=int(data["image_width"]),
+        height=int(data["image_height"]),
+        image_corruption=image_corruption,
     )
     if index < 0 or index >= len(dataset):
-        raise IndexError(
-            f"Индекс dev-примера {index} вне диапазона 0..{len(dataset) - 1}"
-        )
-    row = dataset.rows.iloc[index]
-    for column in ("image_path", "mask_path"):
-        parts = {part.lower() for part in Path(str(row[column])).parts}
-        if "val" in parts or "train" not in parts:
-            raise ValueError(
-                f"Preview разрешён только на internal dev из official train; "
-                f"получен путь {row[column]}"
-            )
+        raise IndexError(f"Индекс должен быть от 0 до {len(dataset) - 1}")
+    if not paths.best_checkpoint.is_file():
+        raise FileNotFoundError(f"Best checkpoint не найден: {paths.best_checkpoint}")
 
-    device = select_device(str(training.get("device", "auto")))
-    checkpoint_dir = resolve_path(training["checkpoint_dir"], project_root)
-    checkpoint_path = checkpoint_dir / f"{normalized_name}_best.pt"
-    checkpoint = load_checkpoint(checkpoint_path, device)
-    saved_name = str(checkpoint.get("model_name", normalized_name)).lower()
-    if saved_name != normalized_name:
-        raise ValueError(
-            f"В {checkpoint_path} сохранена модель {saved_name}, "
-            f"но запрошена {normalized_name}"
-        )
-
-    print(f"Загрузка {normalized_name} из {checkpoint_path} на {device}...", flush=True)
+    device = select_device(str(config["training"].get("device", "auto")))
+    checkpoint = torch.load(
+        paths.best_checkpoint,
+        map_location=device,
+        weights_only=False,
+    )
+    model_settings = dict(config["model"])
+    model_name = str(model_settings["name"]).lower()
+    model_settings["encoder_weights"] = None
     model = create_model(
-        normalized_name,
-        classes=int(data.get("num_classes", 19)),
-        encoder_name=str(models.get("encoder", "resnet34")),
-        encoder_weights=None,
+        model_name,
+        classes=int(data["num_classes"]),
+        settings=model_settings,
     ).to(device)
     model.load_state_dict(checkpoint["model_state_dict"], strict=True)
     model.eval()
 
     sample = dataset[index]
     image = sample["image"]
-    amp_enabled = bool(training.get("mixed_precision", True)) and device.type == "cuda"
     with torch.inference_mode(), torch.autocast(
-        device_type=device.type, dtype=torch.float16, enabled=amp_enabled
+        device_type=device.type,
+        dtype=torch.float16,
+        enabled=bool(config["training"].get("mixed_precision", True))
+        and device.type == "cuda",
     ):
-        logits = model(image.unsqueeze(0).to(device))
-        prediction = logits.argmax(dim=1)[0].cpu()
+        prediction = model(image.unsqueeze(0).to(device)).argmax(dim=1)[0].cpu()
 
-    destination = (
-        resolve_path(output_path, project_root)
-        if output_path is not None
-        else project_root
-        / "outputs"
-        / "figures"
-        / f"segmentation_preview_{normalized_name}.png"
-    )
+    destination = paths.figures / f"segmentation_{suffix}_index_{index}.png"
     result = save_segmentation_preview(
         image=image,
         ground_truth=sample["mask"],
@@ -118,25 +91,25 @@ def visualize_checkpoint(
         image_id=str(sample["image_id"]),
         output_path=destination,
     )
-    print(f"Preview сохранён: {result}", flush=True)
+    configure_mlflow(str(config["tracking"]["experiment_name"]))
+    with mlflow.start_run(run_id=read_run_id(paths.run_id)):
+        mlflow.log_artifact(str(result), artifact_path="previews")
+    print(f"Preview сохранён: {result}")
     return result
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", default="configs/experiment.yaml")
-    parser.add_argument("--model", required=True, choices=MODEL_NAMES)
-    parser.add_argument("--index", type=int, default=0)
-    parser.add_argument("--output")
+    parser.add_argument("--config", required=True)
+    parser.add_argument("--index", type=int, required=True)
+    parser.add_argument("--condition", choices=("clean", "darkness"), default="clean")
+    parser.add_argument("--severity", type=int, choices=(1, 2, 3))
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    try:
-        visualize_checkpoint(args.config, args.model, args.index, args.output)
-    except (FileNotFoundError, KeyError, ValueError, IndexError, RuntimeError, OSError) as error:
-        raise SystemExit(f"Ошибка визуализации checkpoint: {error}") from error
+    visualize_checkpoint(args.config, args.index, args.condition, args.severity)
 
 
 if __name__ == "__main__":
