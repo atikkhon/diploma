@@ -38,14 +38,19 @@ def make_run_paths(config: dict[str, Any], project_root: str | Path) -> RunPaths
     if not run_name:
         raise ValueError("run.name не должен быть пустым")
     run_root = resolve_path(config["run"]["output_dir"], project_root)
+    model_dir = config["run"].get("model_dir")
+    if model_dir is None:
+        model_root = run_root / "checkpoints"
+    else:
+        model_root = resolve_path(model_dir, project_root)
     return RunPaths(
         root=run_root,
-        checkpoints=run_root / "checkpoints",
+        checkpoints=model_root,
         metrics=run_root / "metrics",
         figures=run_root / "figures",
         predictions=run_root / "predictions",
-        best_checkpoint=run_root / "checkpoints" / "best.pt",
-        last_checkpoint=run_root / "checkpoints" / "last.pt",
+        best_checkpoint=model_root / "best.pt",
+        last_checkpoint=model_root / "last.pt",
         history=run_root / "metrics" / "training_history.csv",
         run_id=run_root / "mlflow_run_id.txt",
         evaluations=run_root / "metrics" / "evaluation_results.csv",

@@ -18,6 +18,7 @@ data:
 run:
   name: unet_example
   output_dir: runs/unet_example
+  model_dir: models/unet_example
 
 model:
   name: unet
@@ -33,15 +34,10 @@ training:
   weight_decay: 0.0001
   device: auto
   mixed_precision: true
-  checkpoint_dir: checkpoints
-  history_dir: outputs/metrics
 
 evaluation:
   batch_size: 8
   save_predictions: true
-  metrics_dir: outputs/metrics
-  figures_dir: outputs/figures
-  predictions_dir: outputs/predictions
 
 tracking:
   # Set MLFLOW_TRACKING_URI in the environment when a custom URI is needed.

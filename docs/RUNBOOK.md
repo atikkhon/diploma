@@ -12,7 +12,8 @@
 5. Для нового обучения задайте `RESUME_TRAINING = False` и
    `CONTINUE_FROM_RUN = None`.
 6. Запустите раздел 10. Результаты сохранятся в
-   `Google Drive/cityscapes_robustness/runs/<RUN_NAME>`.
+   `Google Drive/cityscapes_robustness/runs/<RUN_NAME>`, а checkpoint-модели — в
+   `Google Drive/cityscapes_robustness/models/<RUN_NAME>`.
 7. В разделе 11 задайте индекс official validation изображения и посмотрите
    четыре панели сегментации.
 8. Выполните clean evaluation в разделе 12.
@@ -41,7 +42,7 @@
 1. В разделе 9 задайте новый уникальный `RUN_NAME`.
 2. Задайте `RESUME_TRAINING = False`.
 3. Задайте `CONTINUE_FROM_RUN = 'имя_старого_run'` или абсолютный путь к старому
-   каталогу run.
+   каталогу результатов run.
 4. Оставьте `INIT_CHECKPOINT = 'last'`, если хотите продолжать обучение честно с
    последней эпохи. Используйте `'best'`, если хотите стартовать с лучшего
    checkpoint старого run.
@@ -49,15 +50,38 @@
    которые надо добавить. Например, если старый run завершился на 8 эпохе и тут
    указать `8`, новый run будет обучаться до target epoch 16.
 
-Новый `run_config.yaml` сохранит `init_from_run`, `init_checkpoint`,
-`initial_checkpoint_epoch`, `additional_epochs` и общий `training.epochs`, поэтому
-архив будет воспроизводимым.
+Новый `run_config.yaml` сохранит `init_from_run`, `init_from_model_dir`,
+`init_checkpoint`, `initial_checkpoint_epoch`, `additional_epochs` и общий
+`training.epochs`, поэтому архив будет воспроизводимым.
+
+## Где лежат результаты и модели
+
+- `runs/<RUN_NAME>/` содержит только лёгкие результаты: `run_config.yaml`,
+  `mlflow_run_id.txt`, CSV, графики, preview и таблицы оценок.
+- `models/<RUN_NAME>/` содержит только веса модели: `best.pt` и `last.pt`.
+
+Если нужно скачать с Google Drive только метрики конкретного эксперимента,
+скачивайте `runs/<RUN_NAME>/` или `runs/<RUN_NAME>/metrics/`; checkpoint-файлы
+останутся отдельно в `models/<RUN_NAME>/`.
 
 ## Правильный порядок оценки
 
 1. Сначала выполните clean evaluation.
 2. Затем запускайте darkness evaluation с любыми нужными уровнями.
 3. Каждый повтор оценки получает новый `evaluation_id`; строки CSV не стираются.
+
+## MLflow UI в Colab
+
+В разделе 16 ноутбука есть четыре простых шага:
+
+1. Запустить сервер MLflow UI. Ячейка сама задаёт SQLite backend, artifact root,
+   Colab proxy flags, показывает ссылку и iframe.
+2. Проверить соединение через `curl -I http://127.0.0.1:5000`.
+3. Повторно открыть ссылку или iframe, если нужно.
+4. Остановить сервер через `pkill -f "mlflow server"`.
+
+Лог сервера сохраняется в
+`Google Drive/cityscapes_robustness/logs/mlflow_ui_server.log`.
 
 ## MLflow локально
 

@@ -9,15 +9,12 @@
 ноутбук переключает Colab-клон на ветку `codex/unet-modular-pipeline`, а параметры
 U-Net задаются вручную.
 
-## Каталог одного запуска
+## Каталоги одного запуска
 
 ```text
 runs/<run_name>/
 ├── run_config.yaml
 ├── mlflow_run_id.txt
-├── checkpoints/
-│   ├── best.pt
-│   └── last.pt
 ├── metrics/
 │   ├── training_history.csv
 │   ├── evaluation_results.csv
@@ -31,13 +28,21 @@ runs/<run_name>/
     ├── dev_miou_curve.png
     ├── dev_per_class_iou_curve.png
     └── segmentation_<condition>_index_<index>.png
+
+models/<run_name>/
+├── best.pt
+└── last.pt
 ```
+
+`runs/<run_name>/` — лёгкая папка результатов: её удобно скачивать с Google Drive
+без весов модели. `models/<run_name>/` хранит только checkpoint-файлы того же run.
 
 Новое имя запуска создаёт новый эксперимент. То же имя с `--resume` продолжает
 его из `last.pt` после обрыва runtime и пишет метрики в тот же MLflow run.
 Дообучение уже завершённой модели делается отдельным новым запуском:
 `--continue-from-run <старый_run>`. В новом `run_config.yaml` сохраняются путь к
-исходному запуску, исходный checkpoint, число добавленных эпох и общий target epochs.
+исходному запуску, папка исходной модели, исходный checkpoint, число добавленных
+эпох и общий target epochs.
 
 ## Локальный запуск
 
@@ -47,7 +52,7 @@ runs/<run_name>/
 python scripts/create_split.py --config configs/experiment.yaml
 python scripts/train_model.py --config configs/experiment.yaml
 python scripts/train_model.py --config configs/experiment.yaml --resume
-python scripts/train_model.py --config configs/experiment.yaml --continue-from-run runs/unet_example --init-checkpoint last
+python scripts/train_model.py --config configs/experiment.yaml --continue-from-run unet_example --init-checkpoint last
 python scripts/visualize_checkpoint.py --config configs/experiment.yaml --index 0
 python scripts/evaluate_model.py --config configs/experiment.yaml --condition clean
 python scripts/evaluate_model.py --config configs/experiment.yaml --condition darkness --severity 1

@@ -139,6 +139,16 @@ def resolve_source_run(source: str, current_run_root: Path) -> Path:
     return (PROJECT_ROOT / source_path).resolve()
 
 
+def source_model_directory(source_run: Path) -> Path:
+    model_dir = source_run.parent.parent / "models" / source_run.name
+    if model_dir.is_dir():
+        return model_dir
+    raise FileNotFoundError(
+        "Не найден каталог модели исходного run. В новой структуре он должен быть здесь: "
+        f"{model_dir}"
+    )
+
+
 def prepare_continuation(
     config: dict[str, Any],
     paths,
@@ -148,8 +158,9 @@ def prepare_continuation(
     if checkpoint_kind not in {"last", "best"}:
         raise ValueError("--init-checkpoint должен быть last или best")
     source_run = resolve_source_run(source, paths.root)
-    source_checkpoint = source_run / "checkpoints" / f"{checkpoint_kind}.pt"
-    source_best = source_run / "checkpoints" / "best.pt"
+    source_models = source_model_directory(source_run)
+    source_checkpoint = source_models / f"{checkpoint_kind}.pt"
+    source_best = source_models / "best.pt"
     source_history = source_run / "metrics" / "training_history.csv"
     if not source_run.is_dir():
         raise FileNotFoundError(f"Исходный run не найден: {source_run}")
@@ -166,6 +177,7 @@ def prepare_continuation(
     config["training"]["additional_epochs"] = additional_epochs
     config["training"]["initial_checkpoint_epoch"] = initial_epoch
     config["training"]["init_from_run"] = str(source_run)
+    config["training"]["init_from_model_dir"] = str(source_models)
     config["training"]["init_checkpoint"] = str(source_checkpoint)
     config["training"]["init_checkpoint_kind"] = checkpoint_kind
     shutil.copy2(source_best, paths.best_checkpoint)

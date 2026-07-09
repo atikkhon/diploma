@@ -254,7 +254,14 @@ def test_run_paths_are_isolated(tmp_path: Path) -> None:
     }
     paths = []
     for name in ("run_a", "run_b"):
-        config = {**template, "run": {"name": name, "output_dir": str(tmp_path / name)}}
+        config = {
+            **template,
+            "run": {
+                "name": name,
+                "output_dir": str(tmp_path / "runs" / name),
+                "model_dir": str(tmp_path / "models" / name),
+            },
+        }
         config_path = tmp_path / f"{name}.yaml"
         config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
         _, _, run_paths = load_run(config_path)
@@ -262,6 +269,9 @@ def test_run_paths_are_isolated(tmp_path: Path) -> None:
     assert paths[0].root != paths[1].root
     assert paths[0].history != paths[1].history
     assert paths[0].best_checkpoint != paths[1].best_checkpoint
+    assert paths[0].root.parent.name == "runs"
+    assert paths[0].checkpoints.parent.name == "models"
+    assert not paths[0].best_checkpoint.is_relative_to(paths[0].root)
 
 
 def test_repeated_csv_results_are_appended(tmp_path: Path) -> None:
