@@ -17,6 +17,7 @@ from src.dataset import (
     CityscapesDataset,
     IMAGE_SUFFIX,
     MASK_SUFFIX,
+    cityscapes_manifest_dataset,
     discover_cityscapes_layout,
     find_cityscapes_pairs,
     prepare_train_id_masks,
@@ -28,7 +29,7 @@ from src.metrics import calculate_metrics, create_confusion_matrix, update_confu
 from src.models import MODEL_BUILDERS
 from src.tracking import flatten_parameters
 from src.train import create_grad_scaler, train_model
-from src.visualization import colorize_mask
+from src.visualization import colorize_mask, save_training_curves
 
 
 @pytest.fixture()
@@ -100,6 +101,27 @@ def test_dataset_pairs_and_split(tiny_cityscapes: dict[str, Path]) -> None:
     train_ids = set(frame.loc[frame["split"] == "train", "image_id"])
     dev_ids = set(frame.loc[frame["split"] == "dev", "image_id"])
     assert train_ids.isdisjoint(dev_ids)
+
+
+def test_manifest_dataset_helper_writes_selected_split(
+    tiny_cityscapes: dict[str, Path],
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "official_val_manifest.csv"
+    dataset = cityscapes_manifest_dataset(
+        dataset_root=tiny_cityscapes["root"],
+        images_dir="leftImg8bit/train",
+        masks_dir="gtFine/train",
+        manifest_path=manifest,
+        split="val",
+        width=384,
+        height=192,
+        expected_count=4,
+    )
+    frame = pd.read_csv(manifest)
+    assert len(dataset) == 4
+    assert set(frame["split"]) == {"val"}
+    assert frame["image_id"].iloc[0].startswith("aachen")
 
 
 def test_dataset_shapes_dtypes_and_mask_resize(
@@ -260,3 +282,22 @@ def test_preview_palette_handles_ignore_index() -> None:
     colored = colorize_mask(torch.tensor([[0, 18, 255]], dtype=torch.int64))
     assert colored.shape == (1, 3, 3)
     assert colored[0, 2].tolist() == [0, 0, 0]
+
+
+def test_training_curves_are_saved(tmp_path: Path) -> None:
+    history = pd.DataFrame(
+        {
+            "epoch": [1, 2],
+            "train_loss": [1.0, 0.8],
+            "dev_loss": [1.1, 0.9],
+            "dev_miou": [0.2, 0.3],
+            **{f"dev_iou_{name}": [0.1, 0.2] for name in ("road", "sidewalk")},
+        }
+    )
+    outputs = save_training_curves(history, tmp_path)
+    assert [path.name for path in outputs] == [
+        "training_loss_curve.png",
+        "dev_miou_curve.png",
+        "dev_per_class_iou_curve.png",
+    ]
+    assert all(path.is_file() and path.stat().st_size > 0 for path in outputs)

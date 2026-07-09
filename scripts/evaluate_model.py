@@ -17,7 +17,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.corruptions import darkness_transform  # noqa: E402
-from src.dataset import CityscapesDataset, find_cityscapes_pairs  # noqa: E402
+from src.dataset import cityscapes_manifest_dataset  # noqa: E402
 from src.evaluate import evaluate_model  # noqa: E402
 from src.experiment import load_run  # noqa: E402
 from src.metrics import CITYSCAPES_CLASS_NAMES  # noqa: E402
@@ -38,37 +38,6 @@ def append_csv(rows: list[dict[str, Any]], destination: Path) -> None:
         previous = pd.read_csv(destination)
         new_rows = pd.concat([previous, new_rows], ignore_index=True)
     new_rows.to_csv(destination, index=False, encoding="utf-8")
-
-
-def official_val_dataset(
-    config: dict[str, Any],
-    project_root: Path,
-    manifest_path: Path,
-    image_corruption=None,
-) -> CityscapesDataset:
-    data = config["data"]
-    dataset_root = resolve_path(data["root"], project_root)
-    pairs = find_cityscapes_pairs(
-        dataset_root,
-        data["official_val_images"],
-        data["official_val_masks"],
-    )
-    if len(pairs) != 500:
-        raise ValueError(
-            f"Официальный Cityscapes val должен содержать 500 пар, найдено {len(pairs)}"
-        )
-    frame = pd.DataFrame(pairs)
-    frame["split"] = "val"
-    frame.to_csv(manifest_path, index=False, encoding="utf-8")
-    return CityscapesDataset(
-        manifest_path=manifest_path,
-        dataset_root=dataset_root,
-        split="val",
-        train=False,
-        width=int(data["image_width"]),
-        height=int(data["image_height"]),
-        image_corruption=image_corruption,
-    )
 
 
 def load_best_checkpoint(path: Path) -> dict[str, Any]:
@@ -109,11 +78,16 @@ def evaluate_run(
     model_name = str(model_settings["name"]).lower()
     device = select_device(str(training.get("device", "auto")))
     manifest_path = paths.metrics / "official_val_manifest.csv"
-    dataset = official_val_dataset(
-        config,
-        project_root,
-        manifest_path,
+    dataset = cityscapes_manifest_dataset(
+        dataset_root=resolve_path(data["root"], project_root),
+        images_dir=data["official_val_images"],
+        masks_dir=data["official_val_masks"],
+        manifest_path=manifest_path,
+        split="val",
+        width=int(data["image_width"]),
+        height=int(data["image_height"]),
         image_corruption=image_corruption,
+        expected_count=500,
     )
     num_workers = int(training.get("num_workers", 0))
     dataloader = DataLoader(

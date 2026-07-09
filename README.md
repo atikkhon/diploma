@@ -27,11 +27,17 @@ runs/<run_name>/
 │       ├── per_class_iou.csv
 │       └── confusion_matrix.csv
 └── figures/
+    ├── training_loss_curve.png
+    ├── dev_miou_curve.png
+    ├── dev_per_class_iou_curve.png
     └── segmentation_<condition>_index_<index>.png
 ```
 
 Новое имя запуска создаёт новый эксперимент. То же имя с `--resume` продолжает
-его из `last.pt` и пишет метрики в тот же MLflow run.
+его из `last.pt` после обрыва runtime и пишет метрики в тот же MLflow run.
+Дообучение уже завершённой модели делается отдельным новым запуском:
+`--continue-from-run <старый_run>`. В новом `run_config.yaml` сохраняются путь к
+исходному запуску, исходный checkpoint, число добавленных эпох и общий target epochs.
 
 ## Локальный запуск
 
@@ -41,10 +47,14 @@ runs/<run_name>/
 python scripts/create_split.py --config configs/experiment.yaml
 python scripts/train_model.py --config configs/experiment.yaml
 python scripts/train_model.py --config configs/experiment.yaml --resume
+python scripts/train_model.py --config configs/experiment.yaml --continue-from-run runs/unet_example --init-checkpoint last
 python scripts/visualize_checkpoint.py --config configs/experiment.yaml --index 0
 python scripts/evaluate_model.py --config configs/experiment.yaml --condition clean
 python scripts/evaluate_model.py --config configs/experiment.yaml --condition darkness --severity 1
 ```
+
+`visualize_checkpoint.py` показывает изображение из official Cityscapes validation,
+то есть из той же выборки, на которой считаются clean/darkness метрики.
 
 ## MLflow UI
 

@@ -9,10 +9,12 @@
 2. Выполните разделы 1–8 по порядку.
 3. Выполните ячейку выбора ветки `codex/unet-modular-pipeline`.
 4. В разделе 9 задайте `RUN_NAME` и параметры U-Net.
-5. Для нового обучения задайте `RESUME_TRAINING = False`.
+5. Для нового обучения задайте `RESUME_TRAINING = False` и
+   `CONTINUE_FROM_RUN = None`.
 6. Запустите раздел 10. Результаты сохранятся в
    `Google Drive/cityscapes_robustness/runs/<RUN_NAME>`.
-7. В разделе 11 задайте индекс и посмотрите четыре панели сегментации.
+7. В разделе 11 задайте индекс official validation изображения и посмотрите
+   четыре панели сегментации.
 8. Выполните clean evaluation в разделе 12.
 9. Выберите `DARKNESS_SEVERITY` 1, 2 или 3 и выполните раздел 13.
 10. Посмотрите результат на искажённом изображении в разделе 14.
@@ -23,16 +25,33 @@
 Задайте другое уникальное `RUN_NAME`, оставьте `RESUME_TRAINING = False` и снова
 запустите разделы 9–16. Старые результаты не изменятся.
 
-## Resume после обрыва
+## Resume после обрыва runtime
 
 1. Снова выполните разделы 1–8.
 2. Укажите прежний `RUN_NAME`.
-3. Задайте `RESUME_TRAINING = True`.
+3. Задайте `RESUME_TRAINING = True` и `CONTINUE_FROM_RUN = None`.
 4. Запустите раздел 10. Будут загружены `last.pt`, optimizer, scaler, история CSV
-   и прежний MLflow run ID.
+   и прежний MLflow run ID. Существующий `run_config.yaml` не перезаписывается.
 
 Не меняйте модель, encoder или размер изображения внутри незавершённого запуска.
 Для других параметров создайте новый `RUN_NAME`.
+
+## Дообучение завершённой модели в новый run
+
+1. В разделе 9 задайте новый уникальный `RUN_NAME`.
+2. Задайте `RESUME_TRAINING = False`.
+3. Задайте `CONTINUE_FROM_RUN = 'имя_старого_run'` или абсолютный путь к старому
+   каталогу run.
+4. Оставьте `INIT_CHECKPOINT = 'last'`, если хотите продолжать обучение честно с
+   последней эпохи. Используйте `'best'`, если хотите стартовать с лучшего
+   checkpoint старого run.
+5. В `MODEL_SETTINGS['unet']['training']['epochs']` укажите число новых эпох,
+   которые надо добавить. Например, если старый run завершился на 8 эпохе и тут
+   указать `8`, новый run будет обучаться до target epoch 16.
+
+Новый `run_config.yaml` сохранит `init_from_run`, `init_checkpoint`,
+`initial_checkpoint_epoch`, `additional_epochs` и общий `training.epochs`, поэтому
+архив будет воспроизводимым.
 
 ## Правильный порядок оценки
 
@@ -56,6 +75,7 @@ python -m mlflow server --backend-store-uri $env:MLFLOW_TRACKING_URI
 ## Частые причины остановки
 
 - `run.name` уже содержит результаты, но `--resume` не указан;
+- для дообучения выбран старый `RUN_NAME` вместо нового пустого run;
 - для resume отсутствует `last.pt`, CSV истории или `mlflow_run_id.txt`;
 - darkness запускается раньше clean evaluation;
 - не заданы `MLFLOW_TRACKING_URI` или `MLFLOW_ARTIFACT_ROOT`;

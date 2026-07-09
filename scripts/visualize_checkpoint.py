@@ -1,4 +1,4 @@
-"""Visualize one run on a selected internal-dev image."""
+"""Visualize one run on a selected official validation image."""
 
 import argparse
 import sys
@@ -13,7 +13,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.corruptions import darkness_transform  # noqa: E402
-from src.dataset import CityscapesDataset  # noqa: E402
+from src.dataset import cityscapes_manifest_dataset  # noqa: E402
 from src.experiment import load_run  # noqa: E402
 from src.models import create_model  # noqa: E402
 from src.tracking import configure_mlflow, read_run_id  # noqa: E402
@@ -42,14 +42,16 @@ def visualize_checkpoint(
         suffix = f"darkness_s{severity}"
 
     data = config["data"]
-    dataset = CityscapesDataset(
-        manifest_path=resolve_path(data["split_file"], project_root),
+    dataset = cityscapes_manifest_dataset(
         dataset_root=resolve_path(data["root"], project_root),
-        split="dev",
-        train=False,
+        images_dir=data["official_val_images"],
+        masks_dir=data["official_val_masks"],
+        manifest_path=paths.metrics / "official_val_manifest.csv",
+        split="val",
         width=int(data["image_width"]),
         height=int(data["image_height"]),
         image_corruption=image_corruption,
+        expected_count=500,
     )
     if index < 0 or index >= len(dataset):
         raise IndexError(f"Индекс должен быть от 0 до {len(dataset) - 1}")

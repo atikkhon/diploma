@@ -7,9 +7,11 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
 import torch  # noqa: E402
 
 from src.dataset import IGNORE_INDEX, IMAGENET_MEAN, IMAGENET_STD
+from src.metrics import CITYSCAPES_CLASS_NAMES
 
 
 CITYSCAPES_COLORS = np.array(
@@ -108,3 +110,76 @@ def save_segmentation_preview(
     if not destination.is_file() or destination.stat().st_size == 0:
         raise OSError(f"Не удалось сохранить preview: {destination}")
     return destination
+
+
+def _prepare_history(history: str | Path | pd.DataFrame) -> pd.DataFrame:
+    if isinstance(history, pd.DataFrame):
+        frame = history.copy()
+    else:
+        path = Path(history).expanduser().resolve()
+        if not path.is_file():
+            raise FileNotFoundError(f"Training history CSV не найден: {path}")
+        frame = pd.read_csv(path)
+    if "epoch" not in frame.columns:
+        raise ValueError("В training_history.csv нет столбца epoch")
+    return frame.sort_values("epoch").reset_index(drop=True)
+
+
+def _finish_curve(figure: plt.Figure, path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(path, dpi=220, bbox_inches="tight")
+    plt.close(figure)
+    if not path.is_file() or path.stat().st_size == 0:
+        raise OSError(f"Не удалось сохранить график: {path}")
+    return path
+
+
+def save_training_curves(
+    history: str | Path | pd.DataFrame,
+    output_dir: str | Path,
+) -> list[Path]:
+    """Save loss, mIoU and per-class IoU training curves as high-resolution PNG."""
+    frame = _prepare_history(history)
+    destination = Path(output_dir).expanduser().resolve()
+    epoch = frame["epoch"].astype(float)
+    paths: list[Path] = []
+
+    figure, axis = plt.subplots(figsize=(10, 6), constrained_layout=True)
+    if "train_loss" in frame.columns:
+        axis.plot(epoch, frame["train_loss"], marker="o", linewidth=2, label="train_loss")
+    if "dev_loss" in frame.columns:
+        axis.plot(epoch, frame["dev_loss"], marker="o", linewidth=2, label="dev_loss")
+    axis.set_title("Training and dev loss")
+    axis.set_xlabel("Epoch")
+    axis.set_ylabel("Loss")
+    axis.grid(alpha=0.3)
+    axis.legend()
+    paths.append(_finish_curve(figure, destination / "training_loss_curve.png"))
+
+    if "dev_miou" not in frame.columns:
+        raise ValueError("В training_history.csv нет столбца dev_miou")
+    figure, axis = plt.subplots(figsize=(10, 6), constrained_layout=True)
+    axis.plot(epoch, frame["dev_miou"], marker="o", linewidth=2, color="#1f77b4")
+    axis.set_title("Dev mIoU")
+    axis.set_xlabel("Epoch")
+    axis.set_ylabel("mIoU")
+    axis.set_ylim(0.0, 1.0)
+    axis.grid(alpha=0.3)
+    paths.append(_finish_curve(figure, destination / "dev_miou_curve.png"))
+
+    figure, axis = plt.subplots(figsize=(18, 10), constrained_layout=True)
+    for class_name in CITYSCAPES_CLASS_NAMES:
+        column = f"dev_iou_{class_name}"
+        if column in frame.columns:
+            axis.plot(epoch, frame[column], linewidth=1.5, label=class_name)
+    if not axis.lines:
+        raise ValueError("В training_history.csv нет dev_iou_* столбцов")
+    axis.set_title("Dev per-class IoU")
+    axis.set_xlabel("Epoch")
+    axis.set_ylabel("IoU")
+    axis.set_ylim(0.0, 1.0)
+    axis.grid(alpha=0.3)
+    axis.legend(loc="center left", bbox_to_anchor=(1.01, 0.5), fontsize=8)
+    paths.append(_finish_curve(figure, destination / "dev_per_class_iou_curve.png"))
+
+    return paths

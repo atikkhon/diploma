@@ -192,6 +192,7 @@ def train_model(
     ignore_index: int = 255,
     on_epoch_end: Callable[[dict[str, float], int], None] | None = None,
     resume_path: str | Path | None = None,
+    resume_history_path: str | Path | None = None,
 ) -> tuple[pd.DataFrame, Path, Path]:
     """Run or resume training, saving CSV and best/last checkpoints."""
     if epochs <= 0:
@@ -249,11 +250,16 @@ def train_model(
             )
         start_epoch = completed_epoch + 1
 
-        if history_file.is_file():
-            previous_history = pd.read_csv(history_file)
+        history_source = (
+            Path(resume_history_path)
+            if resume_history_path is not None
+            else history_file
+        )
+        if history_source.is_file():
+            previous_history = pd.read_csv(history_source)
             if "epoch" not in previous_history.columns:
                 raise ValueError(
-                    f"В истории обучения нет столбца epoch: {history_file}"
+                    f"В истории обучения нет столбца epoch: {history_source}"
                 )
             previous_history = previous_history.loc[
                 previous_history["epoch"] <= completed_epoch
@@ -261,7 +267,7 @@ def train_model(
             history_rows = previous_history.to_dict(orient="records")
         else:
             raise FileNotFoundError(
-                f"Для resume необходим CSV истории: {history_file}"
+                f"Для resume необходим CSV истории: {history_source}"
             )
         print(
             f"[{model_name}] resume из {resume_file}: "

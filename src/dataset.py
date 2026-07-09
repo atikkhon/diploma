@@ -242,6 +242,39 @@ def find_cityscapes_pairs(
     return pairs
 
 
+def cityscapes_manifest_dataset(
+    dataset_root: str | Path,
+    images_dir: str | Path,
+    masks_dir: str | Path,
+    manifest_path: str | Path,
+    split: str,
+    width: int,
+    height: int,
+    image_corruption: Callable[[np.ndarray, str], np.ndarray] | None = None,
+    expected_count: int | None = None,
+) -> "CityscapesDataset":
+    """Create a manifest from one Cityscapes split and return its dataset."""
+    pairs = find_cityscapes_pairs(dataset_root, images_dir, masks_dir)
+    if expected_count is not None and len(pairs) != expected_count:
+        raise ValueError(
+            f"Cityscapes split {split} должен содержать {expected_count} пар, найдено {len(pairs)}"
+        )
+    frame = pd.DataFrame(pairs)
+    frame["split"] = split
+    destination = Path(manifest_path).expanduser().resolve()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    frame.to_csv(destination, index=False, encoding="utf-8")
+    return CityscapesDataset(
+        manifest_path=destination,
+        dataset_root=dataset_root,
+        split=split,
+        train=False,
+        width=width,
+        height=height,
+        image_corruption=image_corruption,
+    )
+
+
 def validate_mask(mask: np.ndarray, mask_path: str | Path = "<mask>") -> None:
     """Require one-channel trainId mask containing only 0..18 and 255."""
     if mask.ndim != 2:
