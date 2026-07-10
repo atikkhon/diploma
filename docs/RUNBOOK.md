@@ -81,6 +81,18 @@
 `evaluation_results.csv` должен содержать 19 строк, а `per_class_iou.csv` —
 361 строку.
 
+В ноутбуке это можно сделать без ручного перебора: сначала выполните обычную
+`clean evaluation` ячейку выбранной модели, затем optional-блок
+`batch corruption evaluation for all severities`.
+
+```python
+BENCHMARK_SEVERITIES = [1, 2, 3]
+```
+
+Этот блок запускает только 18 corruption-оценок. Clean-оценка остаётся отдельной
+ячейкой выше. Логи пишутся в те же файлы, что и при ручном запуске:
+`logs/evaluate_<RUN_NAME>_<condition>_s<severity>.log`.
+
 Если run был создан до добавления новых искажений, после обновления ветки
 заново выполните `Model run helper` и ячейку параметров нужной модели с тем же
 `RUN_NAME` и `RESUME_TRAINING = True`. Ноутбук допишет в старый
@@ -120,6 +132,21 @@ PREVIEW_INDICES = [17, 42, 108]
 Этот блок прогонит clean и все corruption preview для выбранной модели. Для
 сравнения моделей задайте тот же список индексов в секциях U-Net, DeepLabV3+ и
 PSPNet; результаты сохранятся отдельно в папках соответствующих `RUN_NAME`.
+
+Если нужны clean preview и все severity 1, 2, 3 для каждого выбранного индекса,
+используйте optional-блок `batch preview selected image indices for all
+severities`:
+
+```python
+BENCHMARK_PREVIEW_INDICES = [17, 42, 108]
+BENCHMARK_PREVIEW_SEVERITIES = [1, 2, 3]
+```
+
+Для каждого индекса этот блок сохранит clean preview и все corruption preview
+для всех severity. PNG сохраняются в `runs/<RUN_NAME>/figures/`, а логи пишутся
+в те же файлы, что и при ручном preview-запуске:
+`logs/preview_<RUN_NAME>_clean.log` и
+`logs/preview_<RUN_NAME>_<condition>_s<severity>.log`.
 
 ## MLflow UI в Colab
 
