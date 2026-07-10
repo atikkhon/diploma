@@ -7,7 +7,7 @@ DeepLabV3+ и PSPNet, а из искажений оставлен `darkness`. К
 
 Основной сценарий находится в `notebooks/run_all_colab.ipynb`. Разделы 1–8
 подготавливают GPU, Google Drive, Cityscapes, split и проверяют dataset. После них
-ноутбук переключает Colab-клон на ветку `codex/unet-modular-pipeline`. После этого
+ноутбук переключает Colab-клон на ветку `codex/modular-segmentation-pipeline`. После этого
 каждая модель имеет собственную сворачиваемую секцию с параметрами, обучением,
 оценкой и darkness-проверкой.
 

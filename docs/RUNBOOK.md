@@ -7,7 +7,7 @@
 
 1. Откройте `notebooks/run_all_colab.ipynb` и включите GPU.
 2. Выполните разделы 1–8 по порядку.
-3. Выполните ячейку выбора ветки `codex/unet-modular-pipeline`.
+3. Выполните ячейку выбора ветки `codex/modular-segmentation-pipeline`.
 4. Откройте секцию нужной модели: U-Net, DeepLabV3+ или PSPNet.
 5. В параметрах выбранной модели задайте `RUN_NAME` и гиперпараметры.
 6. Для нового обучения задайте `RESUME_TRAINING = False` и
