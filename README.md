@@ -60,13 +60,13 @@ python scripts/train_model.py --config configs/experiment.yaml
 python scripts/train_model.py --config configs/experiment.yaml --resume
 python scripts/train_model.py --config configs/experiment.yaml --continue-from-run unet_example --init-checkpoint last
 python scripts/visualize_checkpoint.py --config configs/experiment.yaml --index 0
-python scripts/evaluate_model.py --config configs/experiment.yaml --condition clean
-python scripts/evaluate_model.py --config configs/experiment.yaml --condition darkness --severity 1
-python scripts/evaluate_model.py --config configs/experiment.yaml --condition brightness --severity 1
-python scripts/evaluate_model.py --config configs/experiment.yaml --condition gaussian_blur --severity 1
-python scripts/evaluate_model.py --config configs/experiment.yaml --condition gaussian_noise --severity 1
-python scripts/evaluate_model.py --config configs/experiment.yaml --condition jpeg_compression --severity 1
-python scripts/evaluate_model.py --config configs/experiment.yaml --condition fog --severity 1
+python scripts/evaluate_model.py --config configs/experiment.yaml --replace-existing --condition clean
+python scripts/evaluate_model.py --config configs/experiment.yaml --replace-existing --condition darkness --severity 1
+python scripts/evaluate_model.py --config configs/experiment.yaml --replace-existing --condition brightness --severity 1
+python scripts/evaluate_model.py --config configs/experiment.yaml --replace-existing --condition gaussian_blur --severity 1
+python scripts/evaluate_model.py --config configs/experiment.yaml --replace-existing --condition gaussian_noise --severity 1
+python scripts/evaluate_model.py --config configs/experiment.yaml --replace-existing --condition jpeg_compression --severity 1
+python scripts/evaluate_model.py --config configs/experiment.yaml --replace-existing --condition fog --severity 1
 ```
 
 `visualize_checkpoint.py` показывает изображение из official Cityscapes validation,

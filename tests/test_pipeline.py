@@ -338,6 +338,50 @@ def test_repeated_csv_results_are_appended(tmp_path: Path) -> None:
     assert result["evaluation_id"].tolist() == ["first", "second"]
 
 
+def test_replace_existing_csv_results(tmp_path: Path) -> None:
+    destination = tmp_path / "evaluation_results.csv"
+    replace_columns = ("run_name", "model", "condition", "severity")
+    append_csv(
+        [
+            {
+                "evaluation_id": "old_clean",
+                "run_name": "run_a",
+                "model": "unet",
+                "condition": "clean",
+                "severity": 0,
+                "miou": 0.1,
+            },
+            {
+                "evaluation_id": "old_brightness",
+                "run_name": "run_a",
+                "model": "unet",
+                "condition": "brightness",
+                "severity": 1,
+                "miou": 0.2,
+            },
+        ],
+        destination,
+    )
+    append_csv(
+        [
+            {
+                "evaluation_id": "new_brightness",
+                "run_name": "run_a",
+                "model": "unet",
+                "condition": "brightness",
+                "severity": 1,
+                "miou": 0.3,
+            }
+        ],
+        destination,
+        replace_existing=True,
+        replace_columns=replace_columns,
+    )
+    result = pd.read_csv(destination)
+    assert result["evaluation_id"].tolist() == ["old_clean", "new_brightness"]
+    assert result["miou"].tolist() == [0.1, 0.3]
+
+
 def test_tracking_parameters_are_flattened() -> None:
     assert flatten_parameters(
         {"seed": 42, "training": {"epochs": 8}, "models": ["unet"]}

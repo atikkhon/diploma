@@ -37,10 +37,33 @@ from src.utils import (  # noqa: E402
 )
 
 
-def append_csv(rows: list[dict[str, Any]], destination: Path) -> None:
+def replacement_mask(frame: pd.DataFrame, keys: dict[str, Any]) -> pd.Series:
+    mask = pd.Series(True, index=frame.index)
+    for column, value in keys.items():
+        if column not in frame.columns:
+            return pd.Series(False, index=frame.index)
+        if column == "severity":
+            mask &= pd.to_numeric(frame[column], errors="coerce") == int(value)
+        else:
+            mask &= frame[column].astype(str) == str(value)
+    return mask
+
+
+def append_csv(
+    rows: list[dict[str, Any]],
+    destination: Path,
+    replace_existing: bool = False,
+    replace_columns: tuple[str, ...] = (),
+) -> None:
     new_rows = pd.DataFrame(rows)
     if destination.is_file():
         previous = pd.read_csv(destination)
+        if replace_existing:
+            if not replace_columns:
+                raise ValueError("replace_columns must be provided")
+            keys = new_rows.loc[:, list(replace_columns)].drop_duplicates()
+            for key in keys.to_dict(orient="records"):
+                previous = previous.loc[~replacement_mask(previous, key)]
         new_rows = pd.concat([previous, new_rows], ignore_index=True)
     new_rows.to_csv(destination, index=False, encoding="utf-8")
 
@@ -59,6 +82,7 @@ def evaluate_run(
     config_path: str | Path,
     condition: str,
     severity: int | None = None,
+    replace_existing: bool = False,
 ) -> Path:
     config, project_root, paths = load_run(config_path)
     paths.create()
@@ -187,8 +211,19 @@ def evaluate_run(
         index=CITYSCAPES_CLASS_NAMES,
         columns=CITYSCAPES_CLASS_NAMES,
     ).to_csv(confusion_path, index_label="target_class", encoding="utf-8")
-    append_csv([summary], paths.evaluations)
-    append_csv(per_class_rows, paths.per_class)
+    replace_columns = ("run_name", "model", "condition", "severity")
+    append_csv(
+        [summary],
+        paths.evaluations,
+        replace_existing=replace_existing,
+        replace_columns=replace_columns,
+    )
+    append_csv(
+        per_class_rows,
+        paths.per_class,
+        replace_existing=replace_existing,
+        replace_columns=replace_columns,
+    )
 
     parent_run_id = read_run_id(paths.run_id)
     experiment = configure_mlflow(str(config["tracking"]["experiment_name"]))
@@ -229,12 +264,17 @@ def parse_args() -> argparse.Namespace:
         required=True,
     )
     parser.add_argument("--severity", type=int, choices=(1, 2, 3))
+    parser.add_argument(
+        "--replace-existing",
+        action="store_true",
+        help="Replace previous CSV rows for the same run/model/condition/severity",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    evaluate_run(args.config, args.condition, args.severity)
+    evaluate_run(args.config, args.condition, args.severity, args.replace_existing)
 
 
 if __name__ == "__main__":
