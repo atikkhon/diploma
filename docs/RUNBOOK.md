@@ -15,8 +15,7 @@
 7. Запустите train/resume/continue ячейку этой модели. Результаты сохранятся в
    `Google Drive/cityscapes_robustness/runs/<RUN_NAME>`, а checkpoint-модели — в
    `Google Drive/cityscapes_robustness/models/<RUN_NAME>`.
-8. В clean preview ячейке задайте индекс official validation изображения и посмотрите
-   четыре панели сегментации.
+8. В ячейке `preview image index` задайте индекс official validation изображения.
 9. Выполните clean evaluation.
 10. Выберите severity 1, 2 или 3 в нужном corruption-блоке и выполните evaluation.
 11. Посмотрите preview на искажённом изображении.
@@ -80,6 +79,29 @@
 `RUN_NAME` и `RESUME_TRAINING = True`. Ноутбук допишет в старый
 `run_config.yaml` недостающие corruption-настройки, но не будет менять
 параметры обучения, модель, encoder, пути и веса.
+
+## Preview изображений
+
+Для ручного просмотра одного изображения в секции нужной модели задайте:
+
+```python
+IMAGE_INDEX = 17
+```
+
+Затем запускайте нужные preview-ячейки: clean, darkness, brightness, blur,
+noise, JPEG или fog. Все preview сохраняются в `runs/<RUN_NAME>/figures/`, а
+имя файла содержит condition, severity и index.
+
+Когда отберёте несколько удачных индексов, используйте блок
+`batch preview selected image indices`:
+
+```python
+PREVIEW_INDICES = [17, 42, 108]
+```
+
+Этот блок прогонит clean и все corruption preview для выбранной модели. Для
+сравнения моделей задайте тот же список индексов в секциях U-Net, DeepLabV3+ и
+PSPNet; результаты сохранятся отдельно в папках соответствующих `RUN_NAME`.
 
 ## MLflow UI в Colab
 
