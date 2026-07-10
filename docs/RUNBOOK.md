@@ -62,10 +62,16 @@
 - `runs/<RUN_NAME>/` содержит только лёгкие результаты: `run_config.yaml`,
   `mlflow_run_id.txt`, CSV, графики, preview и таблицы оценок.
 - `models/<RUN_NAME>/` содержит только веса модели: `best.pt` и `last.pt`.
+- `mlartifacts/` содержит только лёгкие MLflow artifacts. Веса `.pt/.pth/.ckpt`
+  туда больше не логируются.
 
 Если нужно скачать с Google Drive только метрики конкретного эксперимента,
 скачивайте `runs/<RUN_NAME>/` или `runs/<RUN_NAME>/metrics/`; checkpoint-файлы
 останутся отдельно в `models/<RUN_NAME>/`.
+
+Optional clean-up ячейка в notebook сохраняет `runs/` и `models/`, удаляет старые
+папки `checkpoints/`, `training_metrics/`, `stage_markers/`, `outputs/`, а также
+удаляет дубли весов из `mlartifacts/`.
 
 ## Правильный порядок оценки
 

@@ -294,7 +294,7 @@ def run_training(
             write_run_id(paths.run_id, run.info.run_id)
             mlflow.log_params(flatten_parameters(config))
         print(f"MLflow run_id: {run.info.run_id}", flush=True)
-        _, best_path, last_path = train_model(
+        train_model(
             model=model,
             model_name=model_name,
             train_loader=train_loader,
@@ -321,8 +321,6 @@ def run_training(
         log_artifacts(
             [
                 paths.history,
-                best_path,
-                last_path,
                 environment_path,
                 saved_config,
                 *plot_paths,

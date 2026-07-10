@@ -38,6 +38,9 @@ models/<run_name>/
 
 `runs/<run_name>/` — лёгкая папка результатов: её удобно скачивать с Google Drive
 без весов модели. `models/<run_name>/` хранит только checkpoint-файлы того же run.
+MLflow artifacts не хранят `.pt` веса: в MLflow остаются только лёгкие файлы
+для просмотра — config, history CSV, environment JSON, графики, preview и
+таблицы оценок.
 
 Новое имя запуска создаёт новый эксперимент. То же имя с `--resume` продолжает
 его из `last.pt` после обрыва runtime и пишет метрики в тот же MLflow run.
@@ -77,6 +80,11 @@ python -m mlflow server --backend-store-uri $env:MLFLOW_TRACKING_URI
 
 Откройте `http://127.0.0.1:5000`. Родительский run содержит обучение и preview,
 а каждая clean/darkness-оценка хранится отдельным дочерним run.
+
+В Colab notebook есть optional clean-up ячейка для Google Drive. Она приводит
+`cityscapes_robustness` к новой структуре, сохраняет `runs/` и `models/`,
+удаляет старые неиспользуемые папки и удаляет дубли `.pt/.pth/.ckpt` из
+`mlartifacts/`.
 
 ## Добавление новой модели
 
