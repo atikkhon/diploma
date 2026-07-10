@@ -1,7 +1,8 @@
 # Независимые эксперименты сегментации на Cityscapes
 
 Проект обучает и оценивает один запуск одной модели. Сейчас доступны U-Net,
-DeepLabV3+ и PSPNet, а из искажений оставлен `darkness`. Каждый запуск имеет
+DeepLabV3+ и PSPNet. Для ручной проверки устойчивости доступны `darkness`,
+`brightness`, `gaussian_blur`, `gaussian_noise`, `jpeg_compression` и `fog`. Каждый запуск имеет
 собственные параметры, checkpoint, CSV, изображения и MLflow run, поэтому
 эксперименты не перезаписывают друг друга.
 
@@ -9,7 +10,7 @@ DeepLabV3+ и PSPNet, а из искажений оставлен `darkness`. К
 подготавливают GPU, Google Drive, Cityscapes, split и проверяют dataset. После них
 ноутбук переключает Colab-клон на ветку `codex/modular-segmentation-pipeline`. После этого
 каждая модель имеет собственную сворачиваемую секцию с параметрами, обучением,
-оценкой и darkness-проверкой.
+clean-оценкой и отдельными ручными corruption-проверками.
 
 ## Каталоги одного запуска
 
@@ -29,7 +30,7 @@ runs/<run_name>/
     ├── training_loss_curve.png
     ├── dev_miou_curve.png
     ├── dev_per_class_iou_curve.png
-    └── segmentation_<condition>_index_<index>.png
+    └── segmentation_<condition>[_s<severity>]_index_<index>.png
 
 models/<run_name>/
 ├── best.pt
@@ -61,10 +62,15 @@ python scripts/train_model.py --config configs/experiment.yaml --continue-from-r
 python scripts/visualize_checkpoint.py --config configs/experiment.yaml --index 0
 python scripts/evaluate_model.py --config configs/experiment.yaml --condition clean
 python scripts/evaluate_model.py --config configs/experiment.yaml --condition darkness --severity 1
+python scripts/evaluate_model.py --config configs/experiment.yaml --condition brightness --severity 1
+python scripts/evaluate_model.py --config configs/experiment.yaml --condition gaussian_blur --severity 1
+python scripts/evaluate_model.py --config configs/experiment.yaml --condition gaussian_noise --severity 1
+python scripts/evaluate_model.py --config configs/experiment.yaml --condition jpeg_compression --severity 1
+python scripts/evaluate_model.py --config configs/experiment.yaml --condition fog --severity 1
 ```
 
 `visualize_checkpoint.py` показывает изображение из official Cityscapes validation,
-то есть из той же выборки, на которой считаются clean/darkness метрики.
+то есть из той же выборки, на которой считаются clean/corruption метрики.
 
 ## MLflow UI
 
@@ -79,12 +85,7 @@ python -m mlflow server --backend-store-uri $env:MLFLOW_TRACKING_URI
 ```
 
 Откройте `http://127.0.0.1:5000`. Родительский run содержит обучение и preview,
-а каждая clean/darkness-оценка хранится отдельным дочерним run.
-
-В Colab notebook есть optional clean-up ячейка для Google Drive. Она приводит
-`cityscapes_robustness` к новой структуре, сохраняет `runs/` и `models/`,
-удаляет старые неиспользуемые папки и удаляет дубли `.pt/.pth/.ckpt` из
-`mlartifacts/`.
+а каждая clean/corruption-оценка хранится отдельным дочерним run.
 
 ## Добавление новой модели
 

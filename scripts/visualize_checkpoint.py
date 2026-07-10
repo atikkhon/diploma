@@ -12,7 +12,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.corruptions import darkness_transform  # noqa: E402
+from src.corruptions import (  # noqa: E402
+    SUPPORTED_CORRUPTIONS,
+    corruption_level,
+    corruption_transform,
+)
 from src.dataset import cityscapes_manifest_dataset  # noqa: E402
 from src.experiment import load_run  # noqa: E402
 from src.models import create_model  # noqa: E402
@@ -29,17 +33,20 @@ def visualize_checkpoint(
 ) -> Path:
     config, project_root, paths = load_run(config_path)
     paths.create()
-    if condition == "darkness" and severity not in {1, 2, 3}:
-        raise ValueError("Для darkness выберите severity 1, 2 или 3")
-    if condition not in {"clean", "darkness"}:
-        raise ValueError("condition должен быть clean или darkness")
+    allowed_conditions = {"clean", *SUPPORTED_CORRUPTIONS}
+    if condition not in allowed_conditions:
+        raise ValueError(
+            f"condition должен быть одним из: {', '.join(sorted(allowed_conditions))}"
+        )
+    if condition != "clean" and severity not in {1, 2, 3}:
+        raise ValueError(f"Для {condition} выберите severity 1, 2 или 3")
 
     image_corruption = None
     suffix = "clean"
-    if condition == "darkness":
-        factor = float(config["corruptions"]["darkness"]["levels"][severity]["factor"])
-        image_corruption = darkness_transform(factor)
-        suffix = f"darkness_s{severity}"
+    if condition != "clean":
+        level = corruption_level(config, condition, int(severity))
+        image_corruption = corruption_transform(condition, level)
+        suffix = f"{condition}_s{severity}"
 
     data = config["data"]
     dataset = cityscapes_manifest_dataset(
@@ -104,7 +111,11 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True)
     parser.add_argument("--index", type=int, required=True)
-    parser.add_argument("--condition", choices=("clean", "darkness"), default="clean")
+    parser.add_argument(
+        "--condition",
+        choices=("clean", *SUPPORTED_CORRUPTIONS),
+        default="clean",
+    )
     parser.add_argument("--severity", type=int, choices=(1, 2, 3))
     return parser.parse_args()
 

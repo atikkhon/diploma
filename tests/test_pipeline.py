@@ -12,7 +12,23 @@ import yaml
 
 from scripts.create_split import validate_manifest
 from scripts.evaluate_model import append_csv
-from src.corruptions import DARKNESS_LEVELS, apply_darkness, darkness_transform
+from src.corruptions import (
+    BRIGHTNESS_LEVELS,
+    DARKNESS_LEVELS,
+    FOG_LEVELS,
+    GAUSSIAN_BLUR_LEVELS,
+    GAUSSIAN_NOISE_LEVELS,
+    JPEG_COMPRESSION_LEVELS,
+    SUPPORTED_CORRUPTIONS,
+    apply_brightness,
+    apply_darkness,
+    apply_fog,
+    apply_gaussian_blur,
+    apply_gaussian_noise,
+    apply_jpeg_compression,
+    corruption_transform,
+    darkness_transform,
+)
 from src.dataset import (
     CityscapesDataset,
     IMAGE_SUFFIX,
@@ -185,14 +201,54 @@ def test_expected_models_are_registered() -> None:
     assert set(MODEL_BUILDERS) == {"unet", "deeplabv3plus", "pspnet"}
 
 
-def test_darkness_is_the_only_deterministic_corruption(
+def test_supported_corruptions_are_deterministic_and_shape_safe(
     tiny_cityscapes: dict[str, Path],
 ) -> None:
+    assert SUPPORTED_CORRUPTIONS == (
+        "darkness",
+        "brightness",
+        "gaussian_blur",
+        "gaussian_noise",
+        "jpeg_compression",
+        "fog",
+    )
     assert DARKNESS_LEVELS == {1: 0.75, 2: 0.55, 3: 0.35}
+    assert BRIGHTNESS_LEVELS == {1: 1.15, 2: 1.35, 3: 1.60}
+    assert GAUSSIAN_BLUR_LEVELS == {
+        1: {"kernel_size": 5, "sigma": 1.0},
+        2: {"kernel_size": 9, "sigma": 2.0},
+        3: {"kernel_size": 13, "sigma": 3.0},
+    }
+    assert GAUSSIAN_NOISE_LEVELS == {1: 8.0, 2: 16.0, 3: 28.0}
+    assert JPEG_COMPRESSION_LEVELS == {1: 70, 2: 40, 3: 15}
+    assert FOG_LEVELS == {1: 0.15, 2: 0.30, 3: 0.45}
+
     image = np.full((4, 5, 3), 200, dtype=np.uint8)
-    outputs = [apply_darkness(image, factor) for factor in DARKNESS_LEVELS.values()]
-    assert [int(output[0, 0, 0]) for output in outputs] == [150, 110, 70]
+    dark_outputs = [apply_darkness(image, factor) for factor in DARKNESS_LEVELS.values()]
+    assert [int(output[0, 0, 0]) for output in dark_outputs] == [150, 110, 70]
+
+    bright_outputs = [
+        apply_brightness(image, factor) for factor in BRIGHTNESS_LEVELS.values()
+    ]
+    assert [int(output[0, 0, 0]) for output in bright_outputs] == [230, 255, 255]
+
+    blur = apply_gaussian_blur(image, kernel_size=5, sigma=1.0)
+    noise_a = apply_gaussian_noise(image, sigma=8.0, image_id="sample")
+    noise_b = apply_gaussian_noise(image, sigma=8.0, image_id="sample")
+    jpeg = apply_jpeg_compression(image, quality=70)
+    fog = apply_fog(image, alpha=0.30)
+    outputs = [*dark_outputs, *bright_outputs, blur, noise_a, jpeg, fog]
     assert all(output.dtype == np.uint8 and output.shape == image.shape for output in outputs)
+    assert np.array_equal(noise_a, noise_b)
+    assert not np.array_equal(noise_a, image)
+    assert int(fog[0, 0, 0]) > int(image[0, 0, 0])
+
+    transform = corruption_transform(
+        "gaussian_noise",
+        {"sigma": GAUSSIAN_NOISE_LEVELS[1]},
+    )
+    assert np.array_equal(transform(image, "sample"), noise_a)
+
     clean = make_dataset(tiny_cityscapes)[0]
     dark = make_dataset(
         tiny_cityscapes,

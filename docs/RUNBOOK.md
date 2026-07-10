@@ -18,8 +18,8 @@
 8. В clean preview ячейке задайте индекс official validation изображения и посмотрите
    четыре панели сегментации.
 9. Выполните clean evaluation.
-10. Выберите `DARKNESS_SEVERITY` 1, 2 или 3 и выполните darkness evaluation.
-11. Посмотрите result preview на искажённом изображении.
+10. Выберите severity 1, 2 или 3 в нужном corruption-блоке и выполните evaluation.
+11. Посмотрите preview на искажённом изображении.
 12. Откройте CSV в saved results ячейке или запустите MLflow UI.
 
 ## Новая тренировка той же модели
@@ -69,14 +69,10 @@
 скачивайте `runs/<RUN_NAME>/` или `runs/<RUN_NAME>/metrics/`; checkpoint-файлы
 останутся отдельно в `models/<RUN_NAME>/`.
 
-Optional clean-up ячейка в notebook сохраняет `runs/` и `models/`, удаляет старые
-папки `checkpoints/`, `training_metrics/`, `stage_markers/`, `outputs/`, а также
-удаляет дубли весов из `mlartifacts/`.
-
 ## Правильный порядок оценки
 
 1. Сначала выполните clean evaluation.
-2. Затем запускайте darkness evaluation с любыми нужными уровнями.
+2. Затем запускайте нужные corruption evaluation с любыми нужными уровнями.
 3. Каждый повтор оценки получает новый `evaluation_id`; строки CSV не стираются.
 
 ## MLflow UI в Colab
@@ -110,7 +106,7 @@ python -m mlflow server --backend-store-uri $env:MLFLOW_TRACKING_URI
 - `run.name` уже содержит результаты, но `--resume` не указан;
 - для дообучения выбран старый `RUN_NAME` вместо нового пустого run;
 - для resume отсутствует `last.pt`, CSV истории или `mlflow_run_id.txt`;
-- darkness запускается раньше clean evaluation;
+- corruption evaluation запускается раньше clean evaluation;
 - не заданы `MLFLOW_TRACKING_URI` или `MLFLOW_ARTIFACT_ROOT`;
 - путь Cityscapes не содержит ожидаемые `leftImg8bit` и `gtFine`;
 - в Colab не выбран GPU.

@@ -1,4 +1,4 @@
-"""Evaluate one run on clean images or one manually selected darkness level."""
+"""Evaluate one run on clean images or one manually selected corruption level."""
 
 import argparse
 import sys
@@ -16,7 +16,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.corruptions import darkness_transform  # noqa: E402
+from src.corruptions import (  # noqa: E402
+    SUPPORTED_CORRUPTIONS,
+    corruption_level,
+    corruption_parameters,
+    corruption_transform,
+)
 from src.dataset import cityscapes_manifest_dataset  # noqa: E402
 from src.evaluate import evaluate_model  # noqa: E402
 from src.experiment import load_run  # noqa: E402
@@ -57,17 +62,20 @@ def evaluate_run(
 ) -> Path:
     config, project_root, paths = load_run(config_path)
     paths.create()
-    if condition not in {"clean", "darkness"}:
-        raise ValueError("condition должен быть clean или darkness")
-    if condition == "darkness" and severity not in {1, 2, 3}:
-        raise ValueError("Для darkness выберите severity 1, 2 или 3")
+    allowed_conditions = {"clean", *SUPPORTED_CORRUPTIONS}
+    if condition not in allowed_conditions:
+        raise ValueError(
+            f"condition должен быть одним из: {', '.join(sorted(allowed_conditions))}"
+        )
+    if condition != "clean" and severity not in {1, 2, 3}:
+        raise ValueError(f"Для {condition} выберите severity 1, 2 или 3")
 
-    factor: float | None = None
     image_corruption = None
-    if condition == "darkness":
-        levels = config["corruptions"]["darkness"]["levels"]
-        factor = float(levels[severity]["factor"])
-        image_corruption = darkness_transform(factor)
+    corruption_params: dict[str, float | int] = {}
+    if condition != "clean":
+        level = corruption_level(config, condition, int(severity))
+        corruption_params = corruption_parameters(condition, level)
+        image_corruption = corruption_transform(condition, level)
 
     seed = int(config.get("seed", 42))
     seed_everything(seed)
@@ -125,7 +133,7 @@ def evaluate_run(
     clean_miou = float(metrics["miou"])
     delta_miou = 0.0
     retention = 1.0
-    if condition == "darkness":
+    if condition != "clean":
         if not paths.evaluations.is_file():
             raise FileNotFoundError("Сначала выполните clean evaluation этого запуска")
         previous = pd.read_csv(paths.evaluations)
@@ -142,7 +150,7 @@ def evaluate_run(
         "model": model_name,
         "condition": condition,
         "severity": 0 if severity is None else severity,
-        "darkness_factor": 1.0 if factor is None else factor,
+        **corruption_params,
         "checkpoint_epoch": int(checkpoint["epoch"]),
         "miou": float(metrics["miou"]),
         "macro_dice": float(metrics["macro_dice"]),
@@ -199,7 +207,7 @@ def evaluate_run(
                 "run_name": str(config["run"]["name"]),
                 "condition": condition,
                 "severity": 0 if severity is None else severity,
-                "darkness_factor": 1.0 if factor is None else factor,
+                **corruption_params,
                 "checkpoint_epoch": int(checkpoint["epoch"]),
             }
         )
@@ -215,7 +223,11 @@ def evaluate_run(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True)
-    parser.add_argument("--condition", choices=("clean", "darkness"), required=True)
+    parser.add_argument(
+        "--condition",
+        choices=("clean", *SUPPORTED_CORRUPTIONS),
+        required=True,
+    )
     parser.add_argument("--severity", type=int, choices=(1, 2, 3))
     return parser.parse_args()
 
