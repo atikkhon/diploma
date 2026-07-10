@@ -4,11 +4,17 @@ from typing import Any, Callable
 
 from torch import nn
 
+from src.models.deeplabv3plus import build_deeplabv3plus
+from src.models.pspnet import build_pspnet
 from src.models.unet import build_unet
 
 
 ModelBuilder = Callable[[int, dict[str, Any]], nn.Module]
-MODEL_BUILDERS: dict[str, ModelBuilder] = {"unet": build_unet}
+MODEL_BUILDERS: dict[str, ModelBuilder] = {
+    "unet": build_unet,
+    "deeplabv3plus": build_deeplabv3plus,
+    "pspnet": build_pspnet,
+}
 
 
 def create_model(

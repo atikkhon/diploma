@@ -41,7 +41,7 @@ evaluation:
 
 tracking:
   # Set MLFLOW_TRACKING_URI in the environment when a custom URI is needed.
-  experiment_name: cityscapes_unet
+  experiment_name: cityscapes_segmentation
 
 corruptions:
   darkness:

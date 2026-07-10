@@ -1,4 +1,4 @@
-"""Fast tests for the independent U-Net pipeline."""
+"""Fast tests for the independent segmentation pipeline."""
 
 from pathlib import Path
 
@@ -181,8 +181,8 @@ def test_nested_layout_and_label_conversion(tmp_path: Path) -> None:
     assert converted.tolist() == [[255, 0, 1, 18]]
 
 
-def test_only_unet_is_registered() -> None:
-    assert set(MODEL_BUILDERS) == {"unet"}
+def test_expected_models_are_registered() -> None:
+    assert set(MODEL_BUILDERS) == {"unet", "deeplabv3plus", "pspnet"}
 
 
 def test_darkness_is_the_only_deterministic_corruption(
