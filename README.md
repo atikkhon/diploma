@@ -69,6 +69,32 @@ python scripts/evaluate_model.py --config configs/experiment.yaml --replace-exis
 python scripts/evaluate_model.py --config configs/experiment.yaml --replace-existing --condition fog --severity 1
 ```
 
+## Baseline и robust augmentation
+
+Baseline-run использует только resize, horizontal flip, ImageNet normalize и tensor conversion.
+Robust-run создаётся отдельным новым `RUN_NAME` и обучается с нуля от ImageNet-весов, без
+`--continue-from-run` от baseline. Отличие robust-run от baseline-run — только блок
+`augmentation`.
+
+Для robust-run поставьте:
+
+```yaml
+run:
+  kind: robust
+  source_baseline_run: deeplabv3plus_01_ep16_lr0003
+
+augmentation:
+  policy: robust
+  horizontal_flip_probability: 0.5
+  robust_one_of_probability: 0.5
+```
+
+При `robust_one_of_probability: 0.5` половина train-изображений остаётся без тяжёлого
+искажения, а оставшаяся половина равномерно выбирает один из пяти seen-искажений:
+`darkness`, `brightness`, `gaussian_blur`, `gaussian_noise`, `jpeg_compression`.
+То есть примерно по 10% train-сэмплов на каждый вид. `fog` остаётся unseen-искажением
+для проверки обобщения на evaluation.
+
 `visualize_checkpoint.py` показывает изображение из official Cityscapes validation,
 то есть из той же выборки, на которой считаются clean/corruption метрики.
 

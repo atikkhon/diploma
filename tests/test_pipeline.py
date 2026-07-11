@@ -33,6 +33,7 @@ from src.dataset import (
     CityscapesDataset,
     IMAGE_SUFFIX,
     MASK_SUFFIX,
+    build_transform,
     cityscapes_manifest_dataset,
     discover_cityscapes_layout,
     find_cityscapes_pairs,
@@ -149,6 +150,56 @@ def test_dataset_shapes_dtypes_and_mask_resize(
     assert sample["image"].dtype == torch.float32
     assert sample["mask"].dtype == torch.int64
     assert set(torch.unique(sample["mask"]).tolist()) == {0, 1, 18, 255}
+
+
+def test_robust_train_transform_preserves_mask_values() -> None:
+    image = np.full((24, 48, 3), 120, dtype=np.uint8)
+    image[:, :, 1] = np.arange(48, dtype=np.uint8)[None, :] * 4
+    mask = np.zeros((24, 48), dtype=np.uint8)
+    mask[:, 12:24] = 1
+    mask[:, 24:36] = 18
+    mask[:, 36:] = 255
+    transform = build_transform(
+        train=True,
+        width=48,
+        height=24,
+        augmentation_config={
+            "policy": "robust",
+            "horizontal_flip_probability": 0.0,
+            "robust_one_of_probability": 1.0,
+            "darkness": {
+                "enabled": True,
+                "min_factor": 0.55,
+                "max_factor": 0.95,
+            },
+            "brightness": {
+                "enabled": True,
+                "min_factor": 1.05,
+                "max_factor": 1.60,
+            },
+            "gaussian_blur": {
+                "enabled": True,
+                "kernel_sizes": [3, 5],
+                "sigma_min": 0.3,
+                "sigma_max": 1.2,
+            },
+            "gaussian_noise": {
+                "enabled": True,
+                "sigma_min": 3.0,
+                "sigma_max": 10.0,
+            },
+            "jpeg_compression": {
+                "enabled": True,
+                "quality_min": 40,
+                "quality_max": 85,
+            },
+        },
+    )
+    sample = transform(image=image, mask=mask)
+    assert tuple(sample["image"].shape) == (3, 24, 48)
+    assert tuple(sample["mask"].shape) == (24, 48)
+    assert set(torch.unique(sample["mask"]).tolist()) == {0, 1, 18, 255}
+    assert sample["image"].dtype == torch.float32
 
 
 def test_mask_validation_and_ignore_index() -> None:

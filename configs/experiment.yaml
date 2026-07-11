@@ -35,6 +35,42 @@ training:
   device: auto
   mixed_precision: true
 
+augmentation:
+  policy: baseline
+  horizontal_flip_probability: 0.5
+  robust_one_of_probability: 0.5
+  darkness:
+    enabled: true
+    min_factor: 0.55
+    max_factor: 0.95
+  brightness:
+    enabled: true
+    min_factor: 1.05
+    max_factor: 1.60
+  gaussian_blur:
+    enabled: true
+    kernel_sizes: [3, 5]
+    sigma_min: 0.3
+    sigma_max: 1.2
+  gaussian_noise:
+    enabled: true
+    sigma_min: 3.0
+    sigma_max: 10.0
+  jpeg_compression:
+    enabled: true
+    quality_min: 40
+    quality_max: 85
+
+robust_augmentation:
+  seen_corruptions:
+    - darkness
+    - brightness
+    - gaussian_blur
+    - gaussian_noise
+    - jpeg_compression
+  unseen_corruptions:
+    - fog
+
 evaluation:
   batch_size: 8
   save_predictions: true

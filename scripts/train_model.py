@@ -19,7 +19,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.dataset import CityscapesDataset  # noqa: E402
+from src.dataset import CityscapesDataset, build_transform  # noqa: E402
 from src.experiment import load_run, make_run_paths  # noqa: E402
 from src.models import create_model  # noqa: E402
 from src.tracking import (  # noqa: E402
@@ -55,7 +55,19 @@ def create_loaders(
         "width": int(data["image_width"]),
         "height": int(data["image_height"]),
     }
-    train_dataset = CityscapesDataset(**common, split="train", train=True)
+    augmentation = config.get("augmentation", {"policy": "baseline"})
+    train_transform = build_transform(
+        train=True,
+        width=common["width"],
+        height=common["height"],
+        augmentation_config=augmentation,
+    )
+    train_dataset = CityscapesDataset(
+        **common,
+        split="train",
+        train=True,
+        transform=train_transform,
+    )
     dev_dataset = CityscapesDataset(**common, split="dev", train=False)
     batch_size = int(training["batch_size"])
     num_workers = int(training.get("num_workers", 0))
@@ -82,7 +94,8 @@ def create_loaders(
     )
     print(
         f"DataLoader: train={len(train_dataset)}, dev={len(dev_dataset)}, "
-        f"batch_size={batch_size}, workers={num_workers}",
+        f"batch_size={batch_size}, workers={num_workers}, "
+        f"augmentation={augmentation.get('policy', 'baseline')}",
         flush=True,
     )
     return train_loader, dev_loader

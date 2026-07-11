@@ -27,6 +27,40 @@
 `RESUME_TRAINING = False` и снова запустите её train/evaluation ячейки. Старые
 результаты не изменятся.
 
+## Robust augmentation run
+
+Robust-run делайте как отдельную новую тренировку с нуля, а не как дообучение baseline.
+В секции нужной модели:
+
+1. задайте новый `RUN_NAME`, например `deeplabv3plus_robust_01_ep16_lr0003`;
+2. оставьте `RESUME_TRAINING = False`;
+3. оставьте `CONTINUE_FROM_RUN = None`;
+4. в settings-секции поставьте:
+
+```python
+'run': {
+    'kind': 'robust',
+    'source_baseline_run': 'deeplabv3plus_01_ep16_lr0003',
+},
+'augmentation': ROBUST_AUGMENTATION,
+```
+
+Baseline settings должны оставаться:
+
+```python
+'run': {
+    'kind': 'baseline',
+    'source_baseline_run': None,
+},
+'augmentation': BASELINE_AUGMENTATION,
+```
+
+При `ROBUST_AUGMENTATION` train-transform с вероятностью 0.5 применяет ровно одно
+искажение из пяти seen-вариантов: darkness, brightness, gaussian blur, gaussian noise
+или JPEG compression. Выбор вида равномерный, поэтому каждое seen-искажение получает
+примерно 10% train-сэмплов. Fog в train не используется и остаётся unseen corruption
+для оценки.
+
 ## Resume после обрыва runtime
 
 1. Снова выполните разделы 1–8.

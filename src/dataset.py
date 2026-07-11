@@ -26,6 +26,13 @@ MANIFEST_COLUMNS = [
 ]
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
+ROBUST_CORRUPTIONS = (
+    "darkness",
+    "brightness",
+    "gaussian_blur",
+    "gaussian_noise",
+    "jpeg_compression",
+)
 
 # Official Cityscapes labelId -> 19-class trainId mapping.
 LABEL_ID_TO_TRAIN_ID = np.full(256, IGNORE_INDEX, dtype=np.uint8)
@@ -312,28 +319,211 @@ def read_mask(
     return mask
 
 
+def _clip_uint8(image: np.ndarray) -> np.ndarray:
+    return np.rint(image).clip(0, 255).astype(np.uint8)
+
+
+def _ensure_min_max(
+    settings: dict[str, Any],
+    min_key: str,
+    max_key: str,
+    name: str,
+) -> tuple[float, float]:
+    minimum = float(settings[min_key])
+    maximum = float(settings[max_key])
+    if minimum > maximum:
+        raise ValueError(f"{name}: {min_key} должен быть <= {max_key}")
+    return minimum, maximum
+
+
+class RobustOneOf(A.ImageOnlyTransform):
+    """Apply one randomly selected training corruption to the RGB image only."""
+
+    def __init__(self, augmentation: dict[str, Any], p: float) -> None:
+        super().__init__(p=p)
+        self.augmentation = augmentation
+        self.enabled_corruptions = [
+            name
+            for name in ROBUST_CORRUPTIONS
+            if augmentation.get(name, {}).get("enabled", False)
+        ]
+        if not self.enabled_corruptions:
+            raise ValueError("robust augmentation требует хотя бы одно enabled-искажение")
+        self._validate_settings()
+
+    def _validate_settings(self) -> None:
+        if "darkness" in self.enabled_corruptions:
+            minimum, maximum = _ensure_min_max(
+                self.augmentation["darkness"],
+                "min_factor",
+                "max_factor",
+                "darkness",
+            )
+            if not 0.0 < minimum <= maximum < 1.0:
+                raise ValueError("darkness factor должен быть между 0 и 1")
+        if "brightness" in self.enabled_corruptions:
+            minimum, maximum = _ensure_min_max(
+                self.augmentation["brightness"],
+                "min_factor",
+                "max_factor",
+                "brightness",
+            )
+            if minimum <= 1.0:
+                raise ValueError("brightness min_factor должен быть больше 1")
+            if maximum > 3.0:
+                raise ValueError("brightness max_factor слишком большой для обучения")
+        if "gaussian_blur" in self.enabled_corruptions:
+            settings = self.augmentation["gaussian_blur"]
+            kernel_sizes = [int(value) for value in settings["kernel_sizes"]]
+            if not kernel_sizes:
+                raise ValueError("gaussian_blur.kernel_sizes не должен быть пустым")
+            if any(value <= 1 or value % 2 == 0 for value in kernel_sizes):
+                raise ValueError("gaussian_blur kernel_sizes должны быть нечётными и > 1")
+            sigma_min, sigma_max = _ensure_min_max(
+                settings,
+                "sigma_min",
+                "sigma_max",
+                "gaussian_blur",
+            )
+            if sigma_min <= 0.0:
+                raise ValueError("gaussian_blur sigma_min должен быть > 0")
+        if "gaussian_noise" in self.enabled_corruptions:
+            sigma_min, sigma_max = _ensure_min_max(
+                self.augmentation["gaussian_noise"],
+                "sigma_min",
+                "sigma_max",
+                "gaussian_noise",
+            )
+            if sigma_min <= 0.0 or sigma_max <= 0.0:
+                raise ValueError("gaussian_noise sigma должен быть > 0")
+        if "jpeg_compression" in self.enabled_corruptions:
+            settings = self.augmentation["jpeg_compression"]
+            quality_min = int(settings["quality_min"])
+            quality_max = int(settings["quality_max"])
+            if not 1 <= quality_min <= quality_max <= 100:
+                raise ValueError("jpeg_compression quality должен быть от 1 до 100")
+
+    def get_params(self) -> dict[str, Any]:
+        corruption = str(np.random.choice(self.enabled_corruptions))
+        if corruption == "darkness":
+            minimum, maximum = _ensure_min_max(
+                self.augmentation["darkness"],
+                "min_factor",
+                "max_factor",
+                "darkness",
+            )
+            return {
+                "corruption": corruption,
+                "factor": float(np.random.uniform(minimum, maximum)),
+            }
+        if corruption == "brightness":
+            minimum, maximum = _ensure_min_max(
+                self.augmentation["brightness"],
+                "min_factor",
+                "max_factor",
+                "brightness",
+            )
+            return {
+                "corruption": corruption,
+                "factor": float(np.random.uniform(minimum, maximum)),
+            }
+        if corruption == "gaussian_blur":
+            settings = self.augmentation["gaussian_blur"]
+            kernel_size = int(np.random.choice(settings["kernel_sizes"]))
+            sigma = float(np.random.uniform(settings["sigma_min"], settings["sigma_max"]))
+            return {
+                "corruption": corruption,
+                "kernel_size": kernel_size,
+                "sigma": sigma,
+            }
+        if corruption == "gaussian_noise":
+            settings = self.augmentation["gaussian_noise"]
+            sigma = float(np.random.uniform(settings["sigma_min"], settings["sigma_max"]))
+            return {"corruption": corruption, "sigma": sigma}
+        settings = self.augmentation["jpeg_compression"]
+        quality = int(np.random.randint(settings["quality_min"], settings["quality_max"] + 1))
+        return {"corruption": corruption, "quality": quality}
+
+    def apply(
+        self,
+        image: np.ndarray,
+        corruption: str,
+        factor: float = 1.0,
+        kernel_size: int = 3,
+        sigma: float = 1.0,
+        quality: int = 85,
+        **params: Any,
+    ) -> np.ndarray:
+        del params
+        if corruption == "darkness":
+            return _clip_uint8(image.astype(np.float32) * factor)
+        if corruption == "brightness":
+            return _clip_uint8(image.astype(np.float32) * factor)
+        if corruption == "gaussian_blur":
+            return cv2.GaussianBlur(
+                image,
+                (kernel_size, kernel_size),
+                sigmaX=sigma,
+                sigmaY=sigma,
+            )
+        if corruption == "gaussian_noise":
+            noise = np.random.normal(0.0, sigma, size=image.shape).astype(np.float32)
+            return _clip_uint8(image.astype(np.float32) + noise)
+        if corruption != "jpeg_compression":
+            raise ValueError(f"Неизвестное robust-искажение: {corruption}")
+        success, encoded = cv2.imencode(
+            ".jpg",
+            image,
+            [int(cv2.IMWRITE_JPEG_QUALITY), int(quality)],
+        )
+        if not success:
+            raise ValueError("OpenCV не смог закодировать JPEG")
+        decoded = cv2.imdecode(encoded, cv2.IMREAD_COLOR)
+        if decoded is None:
+            raise ValueError("OpenCV не смог декодировать JPEG")
+        return decoded.astype(np.uint8)
+
+    def get_transform_init_args_names(self) -> tuple[str, ...]:
+        return ()
+
+
 def build_transform(
     train: bool,
     width: int = 384,
     height: int = 192,
     horizontal_flip_probability: float = 0.5,
+    augmentation_config: dict[str, Any] | None = None,
 ) -> A.Compose:
-    """Build deterministic evaluation or flip-enabled training transforms."""
+    """Build deterministic evaluation or baseline/robust training transforms."""
     if width <= 0 or height <= 0:
         raise ValueError("width и height должны быть положительными")
+    augmentation = augmentation_config or {}
+    policy = str(augmentation.get("policy", "baseline")).lower()
+    if policy not in {"baseline", "robust"}:
+        raise ValueError("augmentation.policy должен быть baseline или robust")
+    horizontal_flip_probability = float(
+        augmentation.get("horizontal_flip_probability", horizontal_flip_probability)
+    )
     if not 0.0 <= horizontal_flip_probability <= 1.0:
         raise ValueError("horizontal_flip_probability должен быть между 0 и 1")
-    transforms: list[Any] = []
-    if train:
+    robust_probability = float(augmentation.get("robust_one_of_probability", 0.0))
+    if not 0.0 <= robust_probability <= 1.0:
+        raise ValueError("robust_one_of_probability должен быть между 0 и 1")
+
+    transforms: list[Any] = [
+        A.Resize(
+            height=height,
+            width=width,
+            interpolation=cv2.INTER_LINEAR,
+            mask_interpolation=cv2.INTER_NEAREST,
+        )
+    ]
+    if train and horizontal_flip_probability > 0.0:
         transforms.append(A.HorizontalFlip(p=horizontal_flip_probability))
+    if train and policy == "robust" and robust_probability > 0.0:
+        transforms.append(RobustOneOf(augmentation=augmentation, p=robust_probability))
     transforms.extend(
         [
-            A.Resize(
-                height=height,
-                width=width,
-                interpolation=cv2.INTER_LINEAR,
-                mask_interpolation=cv2.INTER_NEAREST,
-            ),
             A.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
             ToTensorV2(),
         ]
