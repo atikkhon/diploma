@@ -15,11 +15,12 @@
 7. Запустите train/resume/continue ячейку этой модели. Результаты сохранятся в
    `Google Drive/cityscapes_robustness/runs/<RUN_NAME>`, а checkpoint-модели — в
    `Google Drive/cityscapes_robustness/models/<RUN_NAME>`.
-8. В ячейке `preview image index` задайте индекс official validation изображения.
-9. Выполните clean evaluation.
-10. Выберите severity 1, 2 или 3 в нужном corruption-блоке и выполните evaluation.
-11. Посмотрите preview на искажённом изображении.
-12. Откройте CSV в saved results ячейке или запустите MLflow UI.
+8. Выполните clean evaluation и задайте список индексов для clean-preview.
+9. Выберите severity 1, 2 или 3 в нужном corruption-блоке и выполните evaluation.
+10. Посмотрите preview выбранных индексов на искажённом изображении.
+11. Откройте CSV и временные графики обучения в saved results ячейке или
+    запустите MLflow UI.
+12. После отбора сцен при необходимости выполните отдельный qualitative export.
 
 ## Новая тренировка той же модели
 
@@ -92,11 +93,12 @@ Baseline settings должны оставаться:
 
 ## Где лежат результаты и модели
 
-- `runs/<RUN_NAME>/` содержит только лёгкие результаты: `run_config.yaml`,
-  `mlflow_run_id.txt`, CSV, графики, preview и таблицы оценок.
+- `runs/<RUN_NAME>/` содержит `run_config.yaml`, `mlflow_run_id.txt`, CSV и
+  таблицы оценок. После явного qualitative export там также появляется папка
+  `predictions/qualitative/` с выбранными изображениями.
 - `models/<RUN_NAME>/` содержит только веса модели: `best.pt` и `last.pt`.
-- `mlartifacts/` содержит только лёгкие MLflow artifacts. Веса `.pt/.pth/.ckpt`
-  туда больше не логируются.
+- `mlartifacts/` содержит config, CSV, environment JSON и таблицы оценок. Веса,
+  preview, training PNG и qualitative export туда не логируются.
 
 Если нужно скачать с Google Drive только метрики конкретного эксперимента,
 скачивайте `runs/<RUN_NAME>/` или `runs/<RUN_NAME>/metrics/`; checkpoint-файлы
@@ -146,26 +148,16 @@ encoder, пути и веса не меняются.
 
 ## Preview изображений
 
-Для ручного просмотра одного изображения в секции нужной модели задайте:
+Для ручного просмотра одного или нескольких изображений в секции нужной модели
+задайте список, например:
 
 ```python
-IMAGE_INDEX = 17
+CLEAN_PREVIEW_INDICES = [17, 42]
 ```
 
 Затем запускайте нужные preview-ячейки: clean, darkness, brightness, blur,
-noise, JPEG или fog. Все preview сохраняются в `runs/<RUN_NAME>/figures/`, а
-имя файла содержит condition, severity и index.
-
-Когда отберёте несколько удачных индексов, используйте блок
-`batch preview selected image indices`:
-
-```python
-PREVIEW_INDICES = [17, 42, 108]
-```
-
-Этот блок прогонит clean и все corruption preview для выбранной модели. Для
-сравнения моделей задайте тот же список индексов в секциях U-Net, DeepLabV3+ и
-PSPNet; результаты сохранятся отдельно в папках соответствующих `RUN_NAME`.
+noise, JPEG или fog. Четырёхпанельные изображения строятся в памяти и только
+показываются в Colab. PNG, папка `figures/` и MLflow artifact не создаются.
 
 Если нужны clean preview и все severity 1, 2, 3 для каждого выбранного индекса,
 используйте optional-блок `batch preview selected image indices for all
@@ -176,15 +168,61 @@ BENCHMARK_PREVIEW_INDICES = [17, 42, 108]
 BENCHMARK_PREVIEW_SEVERITIES = [1, 2, 3]
 ```
 
-Для каждого индекса этот блок сохранит clean preview и все corruption preview
-для всех severity. PNG сохраняются в `runs/<RUN_NAME>/figures/`, а логи пишутся
-в те же файлы, что и при ручном preview-запуске:
-`logs/preview_<RUN_NAME>_clean.log` и
-`logs/preview_<RUN_NAME>_<condition>_s<severity>.log`.
+Для каждого индекса этот блок покажет clean preview и все corruption preview
+для всех severity. Результаты остаются только в выводе Colab-ячейки.
+
+Три графика обучения также не сохраняются как PNG. Ячейка сохранённых
+результатов каждый раз строит их из `metrics/training_history.csv` и показывает
+в Colab. Числовая история продолжает храниться в CSV и отображаться в MLflow.
+
+## Экспорт исходников для дипломных иллюстраций
+
+После отбора окончательных сцен откройте блок `экспорт исходников для дипломных
+иллюстраций` выбранной модели:
+
+```python
+QUALITATIVE_EXPORT_INDICES = [17, 42, 108, 221, 305, 411]
+QUALITATIVE_EXPORT_CONDITIONS = [
+    'clean',
+    'darkness',
+    'brightness',
+    'gaussian_blur',
+    'gaussian_noise',
+    'jpeg_compression',
+    'fog',
+]
+QUALITATIVE_EXPORT_SEVERITIES = [1, 2, 3]
+```
+
+Это единственный механизм, сохраняющий изображения. Он создаёт:
+
+```text
+runs/<RUN_NAME>/predictions/qualitative/
+├── manifest.csv
+├── class_schema.json
+└── index_<index>__<image_id>/
+    ├── ground_truth_trainid.png
+    ├── clean/
+    │   ├── input.png
+    │   ├── prediction_trainid.png
+    │   ├── overlay.png
+    │   └── metadata.json
+    └── <condition>/severity_<severity>/
+        ├── input.png
+        ├── prediction_trainid.png
+        ├── overlay.png
+        └── metadata.json
+```
+
+`input.png` — фактический RGB-вход модели после resize и corruption, но до
+ImageNet-нормализации. Маски сохраняются как raw trainId, поэтому внешний проект
+может сам применить Cityscapes-палитру и собрать любые сравнения. Повторный
+экспорт той же комбинации `image_id/condition/severity` заменяет строку manifest,
+не создавая дубликатов. Эти файлы не копируются в MLflow.
 
 ## MLflow UI в Colab
 
-В разделе 16 ноутбука есть четыре простых шага:
+В разделе MLflow UI в конце ноутбука есть четыре простых шага:
 
 1. Запустить сервер MLflow UI. Ячейка сама задаёт SQLite backend, artifact root,
    Colab proxy flags, показывает ссылку и iframe.

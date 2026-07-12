@@ -1,8 +1,10 @@
 """Fast tests for the independent segmentation pipeline."""
 
+import json
 from pathlib import Path
 
 import cv2
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pytest
@@ -44,9 +46,19 @@ from src.dataset import (
 from src.experiment import load_run
 from src.metrics import calculate_metrics, create_confusion_matrix, update_confusion_matrix
 from src.models import MODEL_BUILDERS
+from src.qualitative import (
+    QUALITATIVE_SCHEMA_VERSION,
+    save_qualitative_sample,
+    upsert_manifest,
+    write_class_schema,
+)
 from src.tracking import flatten_parameters
 from src.train import create_grad_scaler, train_model
-from src.visualization import colorize_mask, save_training_curves
+from src.visualization import (
+    colorize_mask,
+    create_segmentation_preview,
+    create_training_curve_figures,
+)
 
 
 @pytest.fixture()
@@ -379,6 +391,9 @@ def test_run_paths_are_isolated(tmp_path: Path) -> None:
     assert paths[0].root.parent.name == "runs"
     assert paths[0].checkpoints.parent.name == "models"
     assert not paths[0].best_checkpoint.is_relative_to(paths[0].root)
+    paths[0].create()
+    assert not paths[0].predictions.exists()
+    assert not (paths[0].root / "figures").exists()
 
 
 def test_repeated_csv_results_are_appended(tmp_path: Path) -> None:
@@ -445,7 +460,17 @@ def test_preview_palette_handles_ignore_index() -> None:
     assert colored[0, 2].tolist() == [0, 0, 0]
 
 
-def test_training_curves_are_saved(tmp_path: Path) -> None:
+def test_segmentation_preview_is_built_in_memory(tmp_path: Path) -> None:
+    image = torch.zeros((3, 2, 3), dtype=torch.float32)
+    target = torch.tensor([[0, 1, 255], [18, 1, 0]], dtype=torch.int64)
+    prediction = torch.tensor([[0, 1, 1], [18, 0, 0]], dtype=torch.int64)
+    figure = create_segmentation_preview(image, target, prediction, "sample")
+    assert len(figure.axes) == 4
+    assert list(tmp_path.iterdir()) == []
+    plt.close(figure)
+
+
+def test_training_curves_are_built_without_png_files(tmp_path: Path) -> None:
     history = pd.DataFrame(
         {
             "epoch": [1, 2],
@@ -455,10 +480,89 @@ def test_training_curves_are_saved(tmp_path: Path) -> None:
             **{f"dev_iou_{name}": [0.1, 0.2] for name in ("road", "sidewalk")},
         }
     )
-    outputs = save_training_curves(history, tmp_path)
-    assert [path.name for path in outputs] == [
-        "training_loss_curve.png",
-        "dev_miou_curve.png",
-        "dev_per_class_iou_curve.png",
+    figures = create_training_curve_figures(history)
+    assert [figure.axes[0].get_title() for figure in figures] == [
+        "Training and dev loss",
+        "Dev mIoU",
+        "Dev per-class IoU",
     ]
-    assert all(path.is_file() and path.stat().st_size > 0 for path in outputs)
+    assert list(tmp_path.iterdir()) == []
+    for figure in figures:
+        plt.close(figure)
+
+
+def test_qualitative_export_is_self_describing_and_replaces_manifest_row(
+    tmp_path: Path,
+) -> None:
+    export_root = tmp_path / "predictions" / "qualitative"
+    schema_path = write_class_schema(export_root)
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    assert schema["schema_version"] == QUALITATIVE_SCHEMA_VERSION
+    assert schema["num_classes"] == 19
+
+    image_id = "frankfurt_000000_000294"
+    ground_truth = np.array([[0, 18], [255, 1]], dtype=np.uint8)
+    components = {
+        "input": np.full((2, 2, 3), 100, dtype=np.uint8),
+        "ground_truth_trainid": ground_truth,
+        "prediction_trainid": np.array([[0, 18], [1, 1]], dtype=np.uint8),
+        "overlay": np.full((2, 2, 3), 120, dtype=np.uint8),
+    }
+    metadata = {
+        "run": {"name": "run_a", "kind": "baseline"},
+        "model": {"name": "unet", "encoder_name": "resnet34"},
+        "checkpoint": {"name": "best.pt", "epoch": 8},
+        "dataset": {
+            "split": "official_val",
+            "index": 0,
+            "image_id": image_id,
+            "city": "frankfurt",
+            "sequence": "000000",
+            "frame": "000294",
+        },
+        "condition": {"name": "clean", "severity": None, "parameters": {}},
+        "image_width": 2,
+        "image_height": 2,
+    }
+    first_row = save_qualitative_sample(
+        export_root,
+        dataset_index=0,
+        image_id=image_id,
+        condition="clean",
+        severity=None,
+        components=components,
+        metadata=metadata,
+    )
+    manifest_path = upsert_manifest([first_row], export_root / "manifest.csv")
+    ground_truth_path = export_root / first_row["ground_truth_path"]
+    assert cv2.imread(str(ground_truth_path), cv2.IMREAD_UNCHANGED).tolist() == [
+        [0, 18],
+        [255, 1],
+    ]
+
+    components["input"] = np.full((2, 2, 3), 200, dtype=np.uint8)
+    second_row = save_qualitative_sample(
+        export_root,
+        dataset_index=0,
+        image_id=image_id,
+        condition="clean",
+        severity=None,
+        components=components,
+        metadata=metadata,
+    )
+    upsert_manifest([second_row], manifest_path)
+    manifest = pd.read_csv(
+        manifest_path,
+        dtype={"sequence": str, "frame": str},
+    )
+    assert len(manifest) == 1
+    assert manifest.loc[0, "sequence"] == "000000"
+    assert manifest.loc[0, "frame"] == "000294"
+    assert first_row["input_sha256"] != second_row["input_sha256"]
+    saved_metadata = json.loads(
+        (export_root / second_row["metadata_path"]).read_text(encoding="utf-8")
+    )
+    assert saved_metadata["condition"]["severity"] is None
+    assert saved_metadata["files"]["ground_truth_trainid"].endswith(
+        "ground_truth_trainid.png"
+    )

@@ -12,7 +12,6 @@ class RunPaths:
     root: Path
     checkpoints: Path
     metrics: Path
-    figures: Path
     predictions: Path
     best_checkpoint: Path
     last_checkpoint: Path
@@ -26,8 +25,6 @@ class RunPaths:
             self.root,
             self.checkpoints,
             self.metrics,
-            self.figures,
-            self.predictions,
         ):
             directory.mkdir(parents=True, exist_ok=True)
 
@@ -47,7 +44,6 @@ def make_run_paths(config: dict[str, Any], project_root: str | Path) -> RunPaths
         root=run_root,
         checkpoints=model_root,
         metrics=run_root / "metrics",
-        figures=run_root / "figures",
         predictions=run_root / "predictions",
         best_checkpoint=model_root / "best.pt",
         last_checkpoint=model_root / "last.pt",

@@ -1,14 +1,11 @@
-"""Create clear Cityscapes prediction previews from tensors."""
+"""Build in-memory previews and reusable Cityscapes image components."""
 
 from pathlib import Path
 
-import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
-import numpy as np  # noqa: E402
-import pandas as pd  # noqa: E402
-import torch  # noqa: E402
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import torch
 
 from src.dataset import IGNORE_INDEX, IMAGENET_MEAN, IMAGENET_STD
 from src.metrics import CITYSCAPES_CLASS_NAMES
@@ -74,14 +71,15 @@ def colorize_mask(mask: torch.Tensor | np.ndarray) -> np.ndarray:
     return colored
 
 
-def save_segmentation_preview(
+PREDICTION_OVERLAY_ALPHA = 0.42
+
+
+def segmentation_components(
     image: torch.Tensor,
     ground_truth: torch.Tensor,
     prediction: torch.Tensor,
-    image_id: str,
-    output_path: str | Path,
-) -> Path:
-    """Save input, ground truth, prediction and prediction overlay in one PNG."""
+) -> dict[str, np.ndarray]:
+    """Return exact RGB, trainId masks, color masks and prediction overlay."""
     rgb = denormalize_image(image)
     target = ground_truth.detach().cpu().numpy()
     predicted = prediction.detach().cpu().numpy()
@@ -92,24 +90,44 @@ def save_segmentation_preview(
         )
     ground_truth_color = colorize_mask(target)
     prediction_color = colorize_mask(predicted)
-    overlay = 0.58 * rgb + 0.42 * (prediction_color.astype(np.float32) / 255.0)
+    overlay = (
+        (1.0 - PREDICTION_OVERLAY_ALPHA) * rgb
+        + PREDICTION_OVERLAY_ALPHA
+        * (prediction_color.astype(np.float32) / 255.0)
+    )
+    return {
+        "input": np.rint(rgb * 255.0).clip(0, 255).astype(np.uint8),
+        "ground_truth_trainid": target.astype(np.uint8),
+        "prediction_trainid": predicted.astype(np.uint8),
+        "ground_truth_color": ground_truth_color,
+        "prediction_color": prediction_color,
+        "overlay": np.rint(overlay * 255.0).clip(0, 255).astype(np.uint8),
+    }
+
+
+def create_segmentation_preview(
+    image: torch.Tensor,
+    ground_truth: torch.Tensor,
+    prediction: torch.Tensor,
+    image_id: str,
+) -> plt.Figure:
+    """Build the four-panel preview in memory without writing a file."""
+    components = segmentation_components(image, ground_truth, prediction)
 
     figure, axes = plt.subplots(1, 4, figsize=(16, 4), constrained_layout=True)
-    panels = [rgb, ground_truth_color, prediction_color, overlay]
+    panels = [
+        components["input"],
+        components["ground_truth_color"],
+        components["prediction_color"],
+        components["overlay"],
+    ]
     titles = ["Исходное изображение", "Ground truth", "Prediction", "Наложение"]
     for axis, panel, title in zip(axes, panels, titles):
         axis.imshow(panel)
         axis.set_title(title)
         axis.axis("off")
     figure.suptitle(str(image_id), fontsize=10)
-
-    destination = Path(output_path).expanduser().resolve()
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    figure.savefig(destination, dpi=160, bbox_inches="tight")
-    plt.close(figure)
-    if not destination.is_file() or destination.stat().st_size == 0:
-        raise OSError(f"Не удалось сохранить preview: {destination}")
-    return destination
+    return figure
 
 
 def _prepare_history(history: str | Path | pd.DataFrame) -> pd.DataFrame:
@@ -125,24 +143,13 @@ def _prepare_history(history: str | Path | pd.DataFrame) -> pd.DataFrame:
     return frame.sort_values("epoch").reset_index(drop=True)
 
 
-def _finish_curve(figure: plt.Figure, path: Path) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    figure.savefig(path, dpi=220, bbox_inches="tight")
-    plt.close(figure)
-    if not path.is_file() or path.stat().st_size == 0:
-        raise OSError(f"Не удалось сохранить график: {path}")
-    return path
-
-
-def save_training_curves(
+def create_training_curve_figures(
     history: str | Path | pd.DataFrame,
-    output_dir: str | Path,
-) -> list[Path]:
-    """Save loss, mIoU and per-class IoU training curves as high-resolution PNG."""
+) -> list[plt.Figure]:
+    """Build loss, mIoU and per-class IoU figures without writing PNG files."""
     frame = _prepare_history(history)
-    destination = Path(output_dir).expanduser().resolve()
     epoch = frame["epoch"].astype(float)
-    paths: list[Path] = []
+    figures: list[plt.Figure] = []
 
     figure, axis = plt.subplots(figsize=(10, 6), constrained_layout=True)
     if "train_loss" in frame.columns:
@@ -154,7 +161,7 @@ def save_training_curves(
     axis.set_ylabel("Loss")
     axis.grid(alpha=0.3)
     axis.legend()
-    paths.append(_finish_curve(figure, destination / "training_loss_curve.png"))
+    figures.append(figure)
 
     if "dev_miou" not in frame.columns:
         raise ValueError("В training_history.csv нет столбца dev_miou")
@@ -165,7 +172,7 @@ def save_training_curves(
     axis.set_ylabel("mIoU")
     axis.set_ylim(0.0, 1.0)
     axis.grid(alpha=0.3)
-    paths.append(_finish_curve(figure, destination / "dev_miou_curve.png"))
+    figures.append(figure)
 
     figure, axis = plt.subplots(figsize=(18, 10), constrained_layout=True)
     for class_name in CITYSCAPES_CLASS_NAMES:
@@ -180,6 +187,6 @@ def save_training_curves(
     axis.set_ylim(0.0, 1.0)
     axis.grid(alpha=0.3)
     axis.legend(loc="center left", bbox_to_anchor=(1.01, 0.5), fontsize=8)
-    paths.append(_finish_curve(figure, destination / "dev_per_class_iou_curve.png"))
+    figures.append(figure)
 
-    return paths
+    return figures

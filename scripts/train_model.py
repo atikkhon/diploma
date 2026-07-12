@@ -41,7 +41,6 @@ from src.utils import (  # noqa: E402
     seed_worker,
     select_device,
 )
-from src.visualization import save_training_curves  # noqa: E402
 
 
 def create_loaders(
@@ -330,13 +329,11 @@ def run_training(
         )
         sync_config_epochs(config, paths)
         write_run_config(config, saved_config)
-        plot_paths = save_training_curves(paths.history, paths.figures)
         log_artifacts(
             [
                 paths.history,
                 environment_path,
                 saved_config,
-                *plot_paths,
             ],
             artifact_path="training",
         )

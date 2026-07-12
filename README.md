@@ -3,7 +3,7 @@
 Проект обучает и оценивает один запуск одной модели. Сейчас доступны U-Net,
 DeepLabV3+ и PSPNet. Для ручной проверки устойчивости доступны `darkness`,
 `brightness`, `gaussian_blur`, `gaussian_noise`, `jpeg_compression` и `fog`. Каждый запуск имеет
-собственные параметры, checkpoint, CSV, изображения и MLflow run, поэтому
+собственные параметры, checkpoint, CSV, qualitative export и MLflow run, поэтому
 эксперименты не перезаписывают друг друга.
 
 Основной сценарий находится в `notebooks/run_all_colab.ipynb`. Разделы 1–8
@@ -26,11 +26,21 @@ runs/<run_name>/
 │       ├── summary.csv
 │       ├── per_class_iou.csv
 │       └── confusion_matrix.csv
-└── figures/
-    ├── training_loss_curve.png
-    ├── dev_miou_curve.png
-    ├── dev_per_class_iou_curve.png
-    └── segmentation_<condition>[_s<severity>]_index_<index>.png
+└── predictions/qualitative/              # создаётся только явным export
+    ├── manifest.csv
+    ├── class_schema.json
+    └── index_<index>__<image_id>/
+        ├── ground_truth_trainid.png
+        ├── clean/
+        │   ├── input.png
+        │   ├── prediction_trainid.png
+        │   ├── overlay.png
+        │   └── metadata.json
+        └── <condition>/severity_<severity>/
+            ├── input.png
+            ├── prediction_trainid.png
+            ├── overlay.png
+            └── metadata.json
 
 models/<run_name>/
 ├── best.pt
@@ -39,9 +49,13 @@ models/<run_name>/
 
 `runs/<run_name>/` — лёгкая папка результатов: её удобно скачивать с Google Drive
 без весов модели. `models/<run_name>/` хранит только checkpoint-файлы того же run.
-MLflow artifacts не хранят `.pt` веса: в MLflow остаются только лёгкие файлы
-для просмотра — config, history CSV, environment JSON, графики, preview и
-таблицы оценок.
+MLflow artifacts не хранят `.pt` веса и qualitative PNG. В MLflow остаются
+config, history CSV, environment JSON и таблицы оценок. Кривые обучения MLflow
+строит из числовых метрик, записанных по эпохам.
+
+Четырёхпанельные segmentation preview и три графика обучения создаются только в
+памяти и показываются в Colab. Папка `figures/` для них не создаётся. Постоянные
+изображения появляются только после явного qualitative export выбранных индексов.
 
 Новое имя запуска создаёт новый эксперимент. То же имя с `--resume` продолжает
 его из `last.pt` после обрыва runtime и пишет метрики в тот же MLflow run.
@@ -67,6 +81,7 @@ python scripts/evaluate_model.py --config configs/experiment.yaml --replace-exis
 python scripts/evaluate_model.py --config configs/experiment.yaml --replace-existing --condition gaussian_noise --severity 1
 python scripts/evaluate_model.py --config configs/experiment.yaml --replace-existing --condition jpeg_compression --severity 1
 python scripts/evaluate_model.py --config configs/experiment.yaml --replace-existing --condition fog --severity 1
+python scripts/export_qualitative.py --config configs/experiment.yaml --indices 0 17 42 --conditions clean darkness brightness gaussian_blur gaussian_noise jpeg_compression fog --severities 1 2 3
 ```
 
 ## Baseline и robust augmentation
@@ -95,8 +110,11 @@ augmentation:
 То есть примерно по 10% train-сэмплов на каждый вид. `fog` остаётся unseen-искажением
 для проверки обобщения на evaluation.
 
-`visualize_checkpoint.py` показывает изображение из official Cityscapes validation,
-то есть из той же выборки, на которой считаются clean/corruption метрики.
+`visualize_checkpoint.py` и notebook-preview показывают изображение из official
+Cityscapes validation, то есть из той же выборки, на которой считаются
+clean/corruption метрики. Preview не создаёт файлы. `export_qualitative.py`
+использует тот же `best.pt`, те же искажения и ту же выборку, но сохраняет
+компоненты для внешнего генератора дипломных иллюстраций.
 
 ## MLflow UI
 
@@ -110,8 +128,9 @@ $env:MLFLOW_ARTIFACT_ROOT = "file:///$root/mlartifacts"
 python -m mlflow server --backend-store-uri $env:MLFLOW_TRACKING_URI
 ```
 
-Откройте `http://127.0.0.1:5000`. Родительский run содержит обучение и preview,
-а каждая clean/corruption-оценка хранится отдельным дочерним run.
+Откройте `http://127.0.0.1:5000`. Родительский run содержит обучение, а каждая
+clean/corruption-оценка хранится отдельным дочерним run. Preview и qualitative
+export в MLflow не копируются.
 
 ## Добавление новой модели
 

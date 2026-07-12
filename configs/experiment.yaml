@@ -73,7 +73,6 @@ robust_augmentation:
 
 evaluation:
   batch_size: 8
-  save_predictions: true
 
 tracking:
   # Set MLFLOW_TRACKING_URI in the environment when a custom URI is needed.
