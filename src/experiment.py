@@ -16,7 +16,6 @@ class RunPaths:
     best_checkpoint: Path
     last_checkpoint: Path
     history: Path
-    run_id: Path
     evaluations: Path
     per_class: Path
 
@@ -48,7 +47,6 @@ def make_run_paths(config: dict[str, Any], project_root: str | Path) -> RunPaths
         best_checkpoint=model_root / "best.pt",
         last_checkpoint=model_root / "last.pt",
         history=run_root / "metrics" / "training_history.csv",
-        run_id=run_root / "mlflow_run_id.txt",
         evaluations=run_root / "metrics" / "evaluation_results.csv",
         per_class=run_root / "metrics" / "per_class_iou.csv",
     )
@@ -57,7 +55,7 @@ def make_run_paths(config: dict[str, Any], project_root: str | Path) -> RunPaths
 def load_run(config_path: str | Path) -> tuple[dict[str, Any], Path, RunPaths]:
     config_file = Path(config_path).expanduser().resolve()
     config = load_yaml(config_file)
-    for section in ("run", "data", "model", "training", "evaluation", "tracking"):
+    for section in ("run", "data", "model", "training", "evaluation"):
         if section not in config:
             raise ValueError(f"В конфигурации отсутствует раздел {section}")
 

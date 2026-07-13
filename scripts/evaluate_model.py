@@ -6,7 +6,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import mlflow
 import pandas as pd
 import torch
 from torch.utils.data import DataLoader
@@ -27,7 +26,6 @@ from src.evaluate import evaluate_model  # noqa: E402
 from src.experiment import load_run  # noqa: E402
 from src.metrics import CITYSCAPES_CLASS_NAMES  # noqa: E402
 from src.models import create_model  # noqa: E402
-from src.tracking import configure_mlflow, finite_metrics, read_run_id  # noqa: E402
 from src.utils import (  # noqa: E402
     make_dataloader_generator,
     resolve_path,
@@ -224,31 +222,6 @@ def evaluate_run(
         replace_existing=replace_existing,
         replace_columns=replace_columns,
     )
-
-    parent_run_id = read_run_id(paths.run_id)
-    experiment = configure_mlflow(str(config["tracking"]["experiment_name"]))
-    with mlflow.start_run(
-        experiment_id=experiment.experiment_id,
-        run_name=f"{config['run']['name']}_{condition}_{evaluation_id}",
-        tags={
-            "mlflow.parentRunId": parent_run_id,
-            "model": model_name,
-            "stage": "evaluation",
-            "condition": condition,
-        },
-    ):
-        mlflow.log_params(
-            {
-                "run_name": str(config["run"]["name"]),
-                "condition": condition,
-                "severity": 0 if severity is None else severity,
-                **corruption_params,
-                "checkpoint_epoch": int(checkpoint["epoch"]),
-            }
-        )
-        mlflow.log_metrics(finite_metrics(summary))
-        for artifact in (summary_path, per_class_path, confusion_path):
-            mlflow.log_artifact(str(artifact), artifact_path="evaluation")
 
     print(pd.DataFrame([summary]).to_string(index=False))
     print(f"Evaluation CSV: {paths.evaluations}")

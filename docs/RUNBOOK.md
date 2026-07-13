@@ -7,7 +7,7 @@
 
 1. Откройте `notebooks/run_all_colab.ipynb` и включите GPU.
 2. Выполните разделы 1–8 по порядку.
-3. Выполните ячейку выбора ветки `codex/modular-segmentation-pipeline`.
+3. Выполните ячейку выбора ветки `codex/no-mlflow-pipeline`.
 4. Откройте секцию нужной модели: U-Net, DeepLabV3+ или PSPNet.
 5. В параметрах выбранной модели задайте `RUN_NAME` и гиперпараметры.
 6. Для нового обучения задайте `RESUME_TRAINING = False` и
@@ -18,8 +18,7 @@
 8. Выполните clean evaluation и задайте список индексов для clean-preview.
 9. Выберите severity 1, 2 или 3 в нужном corruption-блоке и выполните evaluation.
 10. Посмотрите preview выбранных индексов на искажённом изображении.
-11. Откройте CSV и временные графики обучения в saved results ячейке или
-    запустите MLflow UI.
+11. Откройте CSV и временные графики обучения в ячейке сохранённых результатов.
 12. После отбора сцен при необходимости выполните отдельный qualitative export.
 
 ## Новая тренировка той же модели
@@ -68,7 +67,7 @@ Baseline settings должны оставаться:
 2. Укажите прежний `RUN_NAME`.
 3. Задайте `RESUME_TRAINING = True` и `CONTINUE_FROM_RUN = None`.
 4. Запустите train/resume/continue ячейку выбранной модели. Будут загружены
-   `last.pt`, optimizer, scaler, история CSV и прежний MLflow run ID.
+   `last.pt`, optimizer, scaler и история CSV.
    Существующий `run_config.yaml` не перезаписывается.
 
 Не меняйте модель, encoder или размер изображения внутри незавершённого запуска.
@@ -93,12 +92,10 @@ Baseline settings должны оставаться:
 
 ## Где лежат результаты и модели
 
-- `runs/<RUN_NAME>/` содержит `run_config.yaml`, `mlflow_run_id.txt`, CSV и
+- `runs/<RUN_NAME>/` содержит `run_config.yaml`, CSV, сведения об окружении и
   таблицы оценок. После явного qualitative export там также появляется папка
   `predictions/qualitative/` с выбранными изображениями.
 - `models/<RUN_NAME>/` содержит только веса модели: `best.pt` и `last.pt`.
-- `mlartifacts/` содержит config, CSV, environment JSON и таблицы оценок. Веса,
-  preview, training PNG и qualitative export туда не логируются.
 
 Если нужно скачать с Google Drive только метрики конкретного эксперимента,
 скачивайте `runs/<RUN_NAME>/` или `runs/<RUN_NAME>/metrics/`; checkpoint-файлы
@@ -157,7 +154,7 @@ CLEAN_PREVIEW_INDICES = [17, 42]
 
 Затем запускайте нужные preview-ячейки: clean, darkness, brightness, blur,
 noise, JPEG или fog. Четырёхпанельные изображения строятся в памяти и только
-показываются в Colab. PNG, папка `figures/` и MLflow artifact не создаются.
+показываются в Colab. PNG и папка `figures/` не создаются.
 
 Если нужны clean preview и все severity 1, 2, 3 для каждого выбранного индекса,
 используйте optional-блок `batch preview selected image indices for all
@@ -173,7 +170,7 @@ BENCHMARK_PREVIEW_SEVERITIES = [1, 2, 3]
 
 Три графика обучения также не сохраняются как PNG. Ячейка сохранённых
 результатов каждый раз строит их из `metrics/training_history.csv` и показывает
-в Colab. Числовая история продолжает храниться в CSV и отображаться в MLflow.
+в Colab. Числовая история продолжает храниться в CSV.
 
 ## Экспорт исходников для дипломных иллюстраций
 
@@ -218,40 +215,13 @@ runs/<RUN_NAME>/predictions/qualitative/
 ImageNet-нормализации. Маски сохраняются как raw trainId, поэтому внешний проект
 может сам применить Cityscapes-палитру и собрать любые сравнения. Повторный
 экспорт той же комбинации `image_id/condition/severity` заменяет строку manifest,
-не создавая дубликатов. Эти файлы не копируются в MLflow.
-
-## MLflow UI в Colab
-
-В разделе MLflow UI в конце ноутбука есть четыре простых шага:
-
-1. Запустить сервер MLflow UI. Ячейка сама задаёт SQLite backend, artifact root,
-   Colab proxy flags, показывает ссылку и iframe.
-2. Проверить соединение через `curl -I http://127.0.0.1:5000`.
-3. Повторно открыть ссылку или iframe, если нужно.
-4. Остановить сервер через `pkill -f "mlflow server"`.
-
-Лог сервера сохраняется в
-`Google Drive/cityscapes_robustness/logs/mlflow_ui_server.log`.
-
-## MLflow локально
-
-Из корня проекта:
-
-```powershell
-$root = (Get-Location).Path.Replace('\', '/')
-$env:MLFLOW_TRACKING_URI = "sqlite:///$root/mlflow.db"
-$env:MLFLOW_ARTIFACT_ROOT = "file:///$root/mlartifacts"
-python -m mlflow server --backend-store-uri $env:MLFLOW_TRACKING_URI
-```
-
-Интерфейс откроется по адресу `http://127.0.0.1:5000`.
+не создавая дубликатов.
 
 ## Частые причины остановки
 
 - `run.name` уже содержит результаты, но `--resume` не указан;
 - для дообучения выбран старый `RUN_NAME` вместо нового пустого run;
-- для resume отсутствует `last.pt`, CSV истории или `mlflow_run_id.txt`;
+- для resume отсутствует `last.pt` или CSV истории;
 - corruption evaluation запускается раньше clean evaluation;
-- не заданы `MLFLOW_TRACKING_URI` или `MLFLOW_ARTIFACT_ROOT`;
 - путь Cityscapes не содержит ожидаемые `leftImg8bit` и `gtFine`;
 - в Colab не выбран GPU.

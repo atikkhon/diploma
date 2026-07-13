@@ -83,7 +83,6 @@ def environment_info() -> dict[str, Any]:
         "albumentations",
         "opencv-python-headless",
         "pandas",
-        "mlflow",
     )
     packages = {package: metadata.version(package) for package in package_names}
     gpu_names = [

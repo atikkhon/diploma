@@ -3,7 +3,7 @@
 import math
 import time
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import pandas as pd
 import torch
@@ -190,7 +190,6 @@ def train_model(
     use_amp: bool = True,
     num_classes: int = 19,
     ignore_index: int = 255,
-    on_epoch_end: Callable[[dict[str, float], int], None] | None = None,
     resume_path: str | Path | None = None,
     resume_history_path: str | Path | None = None,
 ) -> tuple[pd.DataFrame, Path, Path]:
@@ -371,8 +370,6 @@ def train_model(
             last_path,
         )
 
-        if on_epoch_end is not None:
-            on_epoch_end(row, epoch)
         print(
             f"[{model_name}] epoch {epoch:02d}/{epochs}: "
             f"train_loss={row['train_loss']:.4f}, "

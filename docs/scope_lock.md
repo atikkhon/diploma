@@ -7,7 +7,7 @@
   `jpeg_compression` и `fog`; уровень выбирается вручную.
 - Метрики: mIoU, Dice, pixel accuracy, IoU классов, confusion matrix,
   время inference, память, delta mIoU и retention.
-- Результаты: отдельные checkpoint, CSV, PNG и MLflow runs для каждого запуска.
+- Результаты: отдельные checkpoint, CSV и qualitative export для каждого запуска.
 - Robust retraining и автоматический выбор лучшей архитектуры не входят в проект.
 
 Эта версия измеряет устойчивость вручную выбранной модели к выбранному искажению. Она не

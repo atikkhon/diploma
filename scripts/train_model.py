@@ -6,7 +6,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import mlflow
 import pandas as pd
 import torch
 import yaml
@@ -22,14 +21,6 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.dataset import CityscapesDataset, build_transform  # noqa: E402
 from src.experiment import load_run, make_run_paths  # noqa: E402
 from src.models import create_model  # noqa: E402
-from src.tracking import (  # noqa: E402
-    configure_mlflow,
-    finite_metrics,
-    flatten_parameters,
-    log_artifacts,
-    read_run_id,
-    write_run_id,
-)
 from src.train import train_model  # noqa: E402
 from src.utils import (  # noqa: E402
     environment_info,
@@ -218,14 +209,12 @@ def run_training(
         saved_config = paths.root / "run_config.yaml"
     else:
         config["project_root"] = str(project_root)
-
     existing_state = [
         path
         for path in (
             paths.best_checkpoint,
             paths.last_checkpoint,
             paths.history,
-            paths.run_id,
         )
         if path.is_file()
     ]
@@ -275,11 +264,10 @@ def run_training(
         weight_decay=float(training["weight_decay"]),
     )
     criterion = nn.CrossEntropyLoss(ignore_index=int(data["ignore_index"]))
-    environment_path = save_json(
+    save_json(
         environment_info(), paths.metrics / "training_environment.json"
     )
 
-    experiment = configure_mlflow(str(config["tracking"]["experiment_name"]))
     resume_path = None
     resume_history_path = None
     if continue_checkpoint is not None:
@@ -287,57 +275,26 @@ def run_training(
         resume_history_path = continue_history
     elif resume and paths.last_checkpoint.is_file():
         resume_path = paths.last_checkpoint
-    if resume_path is not None and continue_checkpoint is None:
-        active_run = mlflow.start_run(run_id=read_run_id(paths.run_id))
-    else:
-        tags = {"model": model_name, "stage": "training"}
-        if continue_from_run is not None:
-            tags["continued_from_run"] = str(
-                resolve_source_run(continue_from_run, paths.root)
-            )
-        active_run = mlflow.start_run(
-            experiment_id=experiment.experiment_id,
-            run_name=str(config["run"]["name"]),
-            tags=tags,
-        )
-
-    with active_run as run:
-        if resume_path is None or continue_checkpoint is not None:
-            write_run_id(paths.run_id, run.info.run_id)
-            mlflow.log_params(flatten_parameters(config))
-        print(f"MLflow run_id: {run.info.run_id}", flush=True)
-        train_model(
-            model=model,
-            model_name=model_name,
-            train_loader=train_loader,
-            dev_loader=dev_loader,
-            optimizer=optimizer,
-            criterion=criterion,
-            device=device,
-            epochs=int(training["epochs"]),
-            checkpoint_dir=paths.checkpoints,
-            history_path=paths.history,
-            config=config,
-            use_amp=bool(training.get("mixed_precision", True)),
-            num_classes=int(data["num_classes"]),
-            ignore_index=int(data["ignore_index"]),
-            on_epoch_end=lambda row, epoch: mlflow.log_metrics(
-                finite_metrics(row), step=epoch
-            ),
-            resume_path=resume_path,
-            resume_history_path=resume_history_path,
-        )
-        sync_config_epochs(config, paths)
-        write_run_config(config, saved_config)
-        log_artifacts(
-            [
-                paths.history,
-                environment_path,
-                saved_config,
-            ],
-            artifact_path="training",
-        )
-        mlflow.set_tag("status", "completed")
+    train_model(
+        model=model,
+        model_name=model_name,
+        train_loader=train_loader,
+        dev_loader=dev_loader,
+        optimizer=optimizer,
+        criterion=criterion,
+        device=device,
+        epochs=int(training["epochs"]),
+        checkpoint_dir=paths.checkpoints,
+        history_path=paths.history,
+        config=config,
+        use_amp=bool(training.get("mixed_precision", True)),
+        num_classes=int(data["num_classes"]),
+        ignore_index=int(data["ignore_index"]),
+        resume_path=resume_path,
+        resume_history_path=resume_history_path,
+    )
+    sync_config_epochs(config, paths)
+    write_run_config(config, saved_config)
 
     print(f"Run: {config['run']['name']}")
     print(f"Best checkpoint: {paths.best_checkpoint}")

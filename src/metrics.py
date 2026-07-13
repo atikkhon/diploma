@@ -135,7 +135,7 @@ def flatten_metrics(
     prefix: str,
     class_names: list[str] | None = None,
 ) -> dict[str, float]:
-    """Convert nested metric output to flat CSV/MLflow-friendly columns."""
+    """Convert nested metric output to flat training-history columns."""
     names = class_names or CITYSCAPES_CLASS_NAMES
     iou_values = metrics["iou_per_class"]
     if not isinstance(iou_values, list) or len(iou_values) != len(names):

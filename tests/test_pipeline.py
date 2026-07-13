@@ -52,7 +52,6 @@ from src.qualitative import (
     upsert_manifest,
     write_class_schema,
 )
-from src.tracking import flatten_parameters
 from src.train import create_grad_scaler, train_model
 from src.visualization import (
     colorize_mask,
@@ -369,7 +368,6 @@ def test_run_paths_are_isolated(tmp_path: Path) -> None:
         "model": {"name": "unet"},
         "training": {},
         "evaluation": {},
-        "tracking": {},
     }
     paths = []
     for name in ("run_a", "run_b"):
@@ -446,12 +444,6 @@ def test_replace_existing_csv_results(tmp_path: Path) -> None:
     result = pd.read_csv(destination)
     assert result["evaluation_id"].tolist() == ["old_clean", "new_brightness"]
     assert result["miou"].tolist() == [0.1, 0.3]
-
-
-def test_tracking_parameters_are_flattened() -> None:
-    assert flatten_parameters(
-        {"seed": 42, "training": {"epochs": 8}, "models": ["unet"]}
-    ) == {"seed": 42, "training.epochs": 8, "models": "unet"}
 
 
 def test_preview_palette_handles_ignore_index() -> None:
