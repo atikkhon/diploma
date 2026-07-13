@@ -1,4 +1,4 @@
-"""Save a visual smoke test for eight samples from a dataset manifest."""
+"""Check a dataset manifest and visualize eight deterministic samples."""
 
 import argparse
 import sys
@@ -59,7 +59,7 @@ def load_data_config(config_path: str | Path) -> dict:
     with path.open("r", encoding="utf-8") as file:
         config = yaml.safe_load(file)
     if not isinstance(config, dict) or not isinstance(config.get("data"), dict):
-        raise ValueError("В experiment.yaml отсутствует словарь data")
+        raise ValueError("В YAML-конфигурации отсутствует словарь data")
     return config
 
 
@@ -80,12 +80,12 @@ def colorize_mask(mask: np.ndarray) -> np.ndarray:
     return color
 
 
-def smoke_test_dataset(
+def check_dataset(
     config_path: str | Path = "configs/experiment.yaml",
     split: str = "dev",
-    output_path: str | Path = "outputs/figures/dataset_smoke_test.png",
+    output_path: str | Path = "outputs/figures/dataset_check.png",
 ) -> Path:
-    """Create an 8x3 grid with input, ground-truth mask and their overlay."""
+    """Create an 8x3 dataset check with image, mask and overlay."""
     config = load_data_config(config_path)
     data = config["data"]
     required = ["root", "split_file", "image_width", "image_height"]
@@ -103,7 +103,7 @@ def smoke_test_dataset(
     )
     if len(dataset) < 8:
         raise ValueError(
-            f"Для smoke test нужны минимум 8 примеров в split={split}, "
+            f"Для проверки датасета нужны минимум 8 примеров в split={split}, "
             f"найдено: {len(dataset)}"
         )
 
@@ -140,7 +140,7 @@ def smoke_test_dataset(
     plt.close(figure)
     if not destination.is_file() or destination.stat().st_size == 0:
         raise OSError(f"PNG-файл не был сохранён: {destination}")
-    print(f"Smoke test сохранён: {destination}")
+    print(f"Проверка датасета сохранена: {destination}")
     return destination
 
 
@@ -149,14 +149,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", default="configs/experiment.yaml")
     parser.add_argument("--split", choices=["train", "dev", "val"], default="dev")
     parser.add_argument(
-        "--output", default="outputs/figures/dataset_smoke_test.png"
+        "--output", default="outputs/figures/dataset_check.png"
     )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    smoke_test_dataset(args.config, args.split, args.output)
+    check_dataset(args.config, args.split, args.output)
 
 
 if __name__ == "__main__":

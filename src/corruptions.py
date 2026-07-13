@@ -8,13 +8,13 @@ import numpy as np
 
 
 DARKNESS_LEVELS = {1: 0.75, 2: 0.55, 3: 0.35}
-BRIGHTNESS_LEVELS = {1: 1.15, 2: 1.35, 3: 1.60}
+BRIGHTNESS_LEVELS = {1: 1.25, 2: 1.60, 3: 2.00}
 GAUSSIAN_BLUR_LEVELS = {
-    1: {"kernel_size": 5, "sigma": 1.0},
-    2: {"kernel_size": 9, "sigma": 2.0},
-    3: {"kernel_size": 13, "sigma": 3.0},
+    1: {"kernel_size": 3, "sigma": 0.7},
+    2: {"kernel_size": 5, "sigma": 1.2},
+    3: {"kernel_size": 9, "sigma": 2.0},
 }
-GAUSSIAN_NOISE_LEVELS = {1: 8.0, 2: 16.0, 3: 28.0}
+GAUSSIAN_NOISE_LEVELS = {1: 5.0, 2: 10.0, 3: 20.0}
 JPEG_COMPRESSION_LEVELS = {1: 70, 2: 40, 3: 15}
 FOG_LEVELS = {1: 0.15, 2: 0.30, 3: 0.45}
 

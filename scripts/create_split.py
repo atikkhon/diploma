@@ -20,7 +20,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Создать внутреннее train/dev-разбиение Cityscapes."
     )
-    parser.add_argument("--config", required=True, help="Путь к experiment.yaml")
+    parser.add_argument(
+        "--config", required=True, help="Путь к YAML-конфигурации данных"
+    )
     parser.add_argument(
         "--output",
         help="Путь к CSV; по умолчанию используется data.split_file из YAML",

@@ -275,13 +275,13 @@ def test_supported_corruptions_are_deterministic_and_shape_safe(
         "fog",
     )
     assert DARKNESS_LEVELS == {1: 0.75, 2: 0.55, 3: 0.35}
-    assert BRIGHTNESS_LEVELS == {1: 1.15, 2: 1.35, 3: 1.60}
+    assert BRIGHTNESS_LEVELS == {1: 1.25, 2: 1.60, 3: 2.00}
     assert GAUSSIAN_BLUR_LEVELS == {
-        1: {"kernel_size": 5, "sigma": 1.0},
-        2: {"kernel_size": 9, "sigma": 2.0},
-        3: {"kernel_size": 13, "sigma": 3.0},
+        1: {"kernel_size": 3, "sigma": 0.7},
+        2: {"kernel_size": 5, "sigma": 1.2},
+        3: {"kernel_size": 9, "sigma": 2.0},
     }
-    assert GAUSSIAN_NOISE_LEVELS == {1: 8.0, 2: 16.0, 3: 28.0}
+    assert GAUSSIAN_NOISE_LEVELS == {1: 5.0, 2: 10.0, 3: 20.0}
     assert JPEG_COMPRESSION_LEVELS == {1: 70, 2: 40, 3: 15}
     assert FOG_LEVELS == {1: 0.15, 2: 0.30, 3: 0.45}
 
@@ -292,11 +292,11 @@ def test_supported_corruptions_are_deterministic_and_shape_safe(
     bright_outputs = [
         apply_brightness(image, factor) for factor in BRIGHTNESS_LEVELS.values()
     ]
-    assert [int(output[0, 0, 0]) for output in bright_outputs] == [230, 255, 255]
+    assert [int(output[0, 0, 0]) for output in bright_outputs] == [250, 255, 255]
 
-    blur = apply_gaussian_blur(image, kernel_size=5, sigma=1.0)
-    noise_a = apply_gaussian_noise(image, sigma=8.0, image_id="sample")
-    noise_b = apply_gaussian_noise(image, sigma=8.0, image_id="sample")
+    blur = apply_gaussian_blur(image, kernel_size=3, sigma=0.7)
+    noise_a = apply_gaussian_noise(image, sigma=5.0, image_id="sample")
+    noise_b = apply_gaussian_noise(image, sigma=5.0, image_id="sample")
     jpeg = apply_jpeg_compression(image, quality=70)
     fog = apply_fog(image, alpha=0.30)
     outputs = [*dark_outputs, *bright_outputs, blur, noise_a, jpeg, fog]

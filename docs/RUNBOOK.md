@@ -6,20 +6,20 @@
 ## Google Colab
 
 1. Откройте `notebooks/run_all_colab.ipynb` и включите GPU.
-2. Выполните разделы 1–8 по порядку.
-3. Выполните ячейку выбора ветки `codex/no-mlflow-pipeline`.
-4. Откройте секцию нужной модели: U-Net, DeepLabV3+ или PSPNet.
-5. В параметрах выбранной модели задайте `RUN_NAME` и гиперпараметры.
-6. Для нового обучения задайте `RESUME_TRAINING = False` и
+2. Выполните разделы 1–10 по порядку. Ветка `codex/no-mlflow-pipeline` загружается
+   один раз в разделе 4.
+3. Откройте секцию нужной модели: U-Net, DeepLabV3+ или PSPNet.
+4. В параметрах выбранной модели задайте `RUN_NAME` и гиперпараметры.
+5. Для нового обучения задайте `RESUME_TRAINING = False` и
    `CONTINUE_FROM_RUN = None`.
-7. Запустите train/resume/continue ячейку этой модели. Результаты сохранятся в
+6. Запустите train/resume/continue ячейку этой модели. Результаты сохранятся в
    `Google Drive/cityscapes_robustness/runs/<RUN_NAME>`, а checkpoint-модели — в
    `Google Drive/cityscapes_robustness/models/<RUN_NAME>`.
-8. Выполните clean evaluation и задайте список индексов для clean-preview.
-9. Выберите severity 1, 2 или 3 в нужном corruption-блоке и выполните evaluation.
-10. Посмотрите preview выбранных индексов на искажённом изображении.
-11. Откройте CSV и временные графики обучения в ячейке сохранённых результатов.
-12. После отбора сцен при необходимости выполните отдельный qualitative export.
+7. Выполните clean evaluation и задайте список индексов для clean-preview.
+8. Выберите severity 1, 2 или 3 в нужном corruption-блоке и выполните evaluation.
+9. Посмотрите preview выбранных индексов на искажённом изображении.
+10. Откройте CSV и временные графики обучения в ячейке сохранённых результатов.
+11. После отбора сцен при необходимости выполните отдельный qualitative export.
 
 ## Новая тренировка той же модели
 
@@ -63,7 +63,7 @@ Baseline settings должны оставаться:
 
 ## Resume после обрыва runtime
 
-1. Снова выполните разделы 1–8.
+1. Снова выполните разделы 1–10.
 2. Укажите прежний `RUN_NAME`.
 3. Задайте `RESUME_TRAINING = True` и `CONTINUE_FROM_RUN = None`.
 4. Запустите train/resume/continue ячейку выбранной модели. Будут загружены
