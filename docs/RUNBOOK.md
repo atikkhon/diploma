@@ -6,7 +6,7 @@
 ## Google Colab
 
 1. Откройте `notebooks/run_all_colab.ipynb` и включите GPU.
-2. Выполните разделы 1–10 по порядку. Ветка `codex/no-mlflow-pipeline` загружается
+2. Выполните разделы 1–10 по порядку. Ветка `codex/no-baseline-augmentation` загружается
    один раз в разделе 4.
 3. Откройте секцию нужной модели: U-Net, DeepLabV3+ или PSPNet.
 4. В параметрах выбранной модели задайте `RUN_NAME` и гиперпараметры.
@@ -52,8 +52,12 @@ Baseline settings должны оставаться:
     'kind': 'baseline',
     'source_baseline_run': None,
 },
-'augmentation': BASELINE_AUGMENTATION,
 ```
+
+В baseline-настройках блока `augmentation` нет.
+Для baseline train-transform выполняет только resize, ImageNet normalize и tensor conversion.
+Для robust train-transform выполняет resize, одно optional robust-искажение, ImageNet normalize
+и tensor conversion. `HorizontalFlip` не используется ни в одном из этих режимов.
 
 При `ROBUST_AUGMENTATION` train-transform с вероятностью 0.5 применяет ровно одно
 искажение из пяти seen-вариантов: darkness, brightness, gaussian blur, gaussian noise

@@ -491,21 +491,13 @@ def build_transform(
     train: bool,
     width: int = 384,
     height: int = 192,
-    horizontal_flip_probability: float = 0.5,
-    augmentation_config: dict[str, Any] | None = None,
+    robust_augmentation_config: dict[str, Any] | None = None,
 ) -> A.Compose:
-    """Build deterministic evaluation or baseline/robust training transforms."""
+    """Build deterministic transforms with optional robust training corruption."""
     if width <= 0 or height <= 0:
         raise ValueError("width и height должны быть положительными")
-    augmentation = augmentation_config or {}
-    policy = str(augmentation.get("policy", "baseline")).lower()
-    if policy not in {"baseline", "robust"}:
-        raise ValueError("augmentation.policy должен быть baseline или robust")
-    horizontal_flip_probability = float(
-        augmentation.get("horizontal_flip_probability", horizontal_flip_probability)
-    )
-    if not 0.0 <= horizontal_flip_probability <= 1.0:
-        raise ValueError("horizontal_flip_probability должен быть между 0 и 1")
+    augmentation = robust_augmentation_config or {}
+    robust = str(augmentation.get("policy", "")).lower() == "robust"
     robust_probability = float(augmentation.get("robust_one_of_probability", 0.0))
     if not 0.0 <= robust_probability <= 1.0:
         raise ValueError("robust_one_of_probability должен быть между 0 и 1")
@@ -518,9 +510,7 @@ def build_transform(
             mask_interpolation=cv2.INTER_NEAREST,
         )
     ]
-    if train and horizontal_flip_probability > 0.0:
-        transforms.append(A.HorizontalFlip(p=horizontal_flip_probability))
-    if train and policy == "robust" and robust_probability > 0.0:
+    if train and robust and robust_probability > 0.0:
         transforms.append(RobustOneOf(augmentation=augmentation, p=robust_probability))
     transforms.extend(
         [

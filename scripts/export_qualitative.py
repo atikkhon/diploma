@@ -65,7 +65,7 @@ def _metadata(
             "seed": int(config.get("seed", 42)),
             "training_epochs": int(config["training"]["epochs"]),
             "augmentation_policy": str(
-                config.get("augmentation", {}).get("policy", "baseline")
+                config.get("augmentation", {}).get("policy", "none")
             ),
             "config_from_export_root": "../../run_config.yaml",
         },

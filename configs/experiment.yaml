@@ -17,6 +17,8 @@ data:
 
 run:
   name: unet_example
+  kind: baseline
+  source_baseline_run: null
   output_dir: runs/unet_example
   model_dir: models/unet_example
 
@@ -34,10 +36,6 @@ training:
   weight_decay: 0.0001
   device: auto
   mixed_precision: true
-
-augmentation:
-  policy: baseline
-  horizontal_flip_probability: 0.5
 
 evaluation:
   batch_size: 8

@@ -163,6 +163,24 @@ def test_dataset_shapes_dtypes_and_mask_resize(
     assert set(torch.unique(sample["mask"]).tolist()) == {0, 1, 18, 255}
 
 
+def test_baseline_train_transform_is_deterministic_without_augmentation() -> None:
+    image = np.zeros((24, 48, 3), dtype=np.uint8)
+    image[:, :, 0] = np.arange(48, dtype=np.uint8)[None, :] * 5
+    mask = np.zeros((24, 48), dtype=np.uint8)
+    mask[:, 24:] = 18
+    transform = build_transform(train=True, width=48, height=24)
+
+    first = transform(image=image, mask=mask)
+    second = transform(image=image, mask=mask)
+
+    assert torch.equal(first["image"], second["image"])
+    assert torch.equal(first["mask"], second["mask"])
+    assert torch.equal(first["mask"], torch.from_numpy(mask.astype(np.int64)))
+    assert "HorizontalFlip" not in {
+        type(item).__name__ for item in transform.transforms
+    }
+
+
 def test_robust_train_transform_preserves_mask_values() -> None:
     image = np.full((24, 48, 3), 120, dtype=np.uint8)
     image[:, :, 1] = np.arange(48, dtype=np.uint8)[None, :] * 4
@@ -174,9 +192,8 @@ def test_robust_train_transform_preserves_mask_values() -> None:
         train=True,
         width=48,
         height=24,
-        augmentation_config={
+        robust_augmentation_config={
             "policy": "robust",
-            "horizontal_flip_probability": 0.0,
             "robust_one_of_probability": 1.0,
             "darkness": {
                 "enabled": True,
@@ -211,6 +228,9 @@ def test_robust_train_transform_preserves_mask_values() -> None:
     assert tuple(sample["mask"].shape) == (24, 48)
     assert set(torch.unique(sample["mask"]).tolist()) == {0, 1, 18, 255}
     assert sample["image"].dtype == torch.float32
+    assert "HorizontalFlip" not in {
+        type(item).__name__ for item in transform.transforms
+    }
 
 
 def test_mask_validation_and_ignore_index() -> None:
