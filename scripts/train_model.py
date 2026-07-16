@@ -18,10 +18,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.dataset import CityscapesDataset, build_transform  # noqa: E402
+from src.dataset import CityscapesDataset  # noqa: E402
 from src.experiment import load_run, make_run_paths  # noqa: E402
 from src.models import create_model  # noqa: E402
 from src.train import train_model  # noqa: E402
+from src.training_plan import (  # noqa: E402
+    TrainingPlanSampler,
+    prepare_training_plan,
+)
 from src.utils import (  # noqa: E402
     environment_info,
     load_yaml,
@@ -35,7 +39,10 @@ from src.utils import (  # noqa: E402
 
 
 def create_loaders(
-    config: dict[str, Any], project_root: Path, seed: int
+    config: dict[str, Any],
+    project_root: Path,
+    seed: int,
+    training_plan: pd.DataFrame,
 ) -> tuple[DataLoader, DataLoader]:
     data = config["data"]
     training = config["training"]
@@ -47,19 +54,17 @@ def create_loaders(
     }
     augmentation = config.get("augmentation")
     augmentation_policy = str((augmentation or {}).get("policy", "none")).lower()
-    train_transform = build_transform(
-        train=True,
-        width=common["width"],
-        height=common["height"],
-        robust_augmentation_config=augmentation,
-    )
     train_dataset = CityscapesDataset(
         **common,
         split="train",
         train=True,
-        transform=train_transform,
+        training_plan=training_plan,
     )
     dev_dataset = CityscapesDataset(**common, split="dev", train=False)
+    train_sampler = TrainingPlanSampler(
+        training_plan,
+        train_dataset.rows["image_id"].astype(str).tolist(),
+    )
     batch_size = int(training["batch_size"])
     num_workers = int(training.get("num_workers", 0))
     if batch_size <= 0 or num_workers < 0:
@@ -73,7 +78,7 @@ def create_loaders(
     }
     train_loader = DataLoader(
         train_dataset,
-        shuffle=True,
+        sampler=train_sampler,
         generator=make_dataloader_generator(seed),
         **options,
     )
@@ -158,20 +163,23 @@ def prepare_continuation(
     paths,
     source: str,
     checkpoint_kind: str,
-) -> tuple[Path, Path]:
+) -> tuple[Path, Path, Path, Path]:
     if checkpoint_kind not in {"last", "best"}:
         raise ValueError("--init-checkpoint должен быть last или best")
     source_run = resolve_source_run(source, paths.root)
+    if not source_run.is_dir():
+        raise FileNotFoundError(f"Исходный run не найден: {source_run}")
     source_models = source_model_directory(source_run)
     source_checkpoint = source_models / f"{checkpoint_kind}.pt"
     source_best = source_models / "best.pt"
     source_history = source_run / "metrics" / "training_history.csv"
-    if not source_run.is_dir():
-        raise FileNotFoundError(f"Исходный run не найден: {source_run}")
+    source_plan = source_run / "training_plan.csv"
     if not source_history.is_file():
         raise FileNotFoundError(f"История исходного run не найдена: {source_history}")
     if not source_best.is_file():
         raise FileNotFoundError(f"Best checkpoint исходного run не найден: {source_best}")
+    if not source_plan.is_file():
+        raise FileNotFoundError(f"Training plan исходного run не найден: {source_plan}")
 
     initial_epoch = checkpoint_epoch(source_checkpoint)
     additional_epochs = int(config["training"]["epochs"])
@@ -184,8 +192,7 @@ def prepare_continuation(
     config["training"]["init_from_model_dir"] = str(source_models)
     config["training"]["init_checkpoint"] = str(source_checkpoint)
     config["training"]["init_checkpoint_kind"] = checkpoint_kind
-    shutil.copy2(source_best, paths.best_checkpoint)
-    return source_checkpoint, source_history
+    return source_checkpoint, source_history, source_plan, source_best
 
 
 def run_training(
@@ -236,15 +243,20 @@ def run_training(
 
     continue_checkpoint: Path | None = None
     continue_history: Path | None = None
+    continue_plan: Path | None = None
+    continue_best: Path | None = None
     if continue_from_run is not None:
-        continue_checkpoint, continue_history = prepare_continuation(
+        (
+            continue_checkpoint,
+            continue_history,
+            continue_plan,
+            continue_best,
+        ) = prepare_continuation(
             config,
             paths,
             continue_from_run,
             init_checkpoint,
         )
-    if not (resume and saved_config.is_file()):
-        write_run_config(config, saved_config)
 
     seed = int(config.get("seed", 42))
     data = config["data"]
@@ -252,8 +264,43 @@ def run_training(
     training = config["training"]
     model_name = str(model_settings["name"]).lower()
     device = select_device(str(training.get("device", "auto")))
+    split_manifest = resolve_path(data["split_file"], project_root)
+    training_plan = prepare_training_plan(
+        destination=paths.training_plan,
+        split_manifest=split_manifest,
+        epochs=int(training["epochs"]),
+        seed=seed,
+        augmentation=config.get("augmentation"),
+        resume=resume,
+        source_plan=continue_plan,
+        initial_epoch=int(training.get("initial_checkpoint_epoch", 0)),
+    )
+    plan_metadata = dict(config.get("training_plan", {}))
+    plan_metadata.update(
+        {
+            "file": paths.training_plan.name,
+            "seed": seed,
+            "epochs": int(training["epochs"]),
+            "train_images": int(
+                len(training_plan.loc[training_plan["epoch"].astype(int) == 1])
+            ),
+        }
+    )
+    if continue_plan is not None:
+        plan_metadata["source_plan"] = str(continue_plan)
+        plan_metadata["copied_through_epoch"] = int(
+            training.get("initial_checkpoint_epoch", 0)
+        )
+    config["training_plan"] = plan_metadata
+    write_run_config(config, saved_config)
+
     seed_everything(seed)
-    train_loader, dev_loader = create_loaders(config, project_root, seed)
+    train_loader, dev_loader = create_loaders(
+        config,
+        project_root,
+        seed,
+        training_plan,
+    )
     model = create_model(
         model_name,
         classes=int(data["num_classes"]),
@@ -276,6 +323,8 @@ def run_training(
         resume_history_path = continue_history
     elif resume and paths.last_checkpoint.is_file():
         resume_path = paths.last_checkpoint
+    if continue_best is not None:
+        shutil.copy2(continue_best, paths.best_checkpoint)
     train_model(
         model=model,
         model_name=model_name,
@@ -300,6 +349,7 @@ def run_training(
     print(f"Run: {config['run']['name']}")
     print(f"Best checkpoint: {paths.best_checkpoint}")
     print(f"Training CSV: {paths.history}")
+    print(f"Training plan: {paths.training_plan}")
 
 
 def parse_args() -> argparse.Namespace:

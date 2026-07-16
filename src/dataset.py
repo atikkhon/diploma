@@ -11,6 +11,8 @@ import torch
 from albumentations.pytorch import ToTensorV2
 from torch.utils.data import Dataset
 
+from src.training_plan import apply_training_plan_corruption
+
 
 IMAGE_SUFFIX = "_leftImg8bit.png"
 MASK_SUFFIX = "_gtFine_labelTrainIds.png"
@@ -26,14 +28,6 @@ MANIFEST_COLUMNS = [
 ]
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
-ROBUST_CORRUPTIONS = (
-    "darkness",
-    "brightness",
-    "gaussian_blur",
-    "gaussian_noise",
-    "jpeg_compression",
-)
-
 # Official Cityscapes labelId -> 19-class trainId mapping.
 LABEL_ID_TO_TRAIN_ID = np.full(256, IGNORE_INDEX, dtype=np.uint8)
 LABEL_ID_TO_TRAIN_ID[
@@ -319,188 +313,15 @@ def read_mask(
     return mask
 
 
-def _clip_uint8(image: np.ndarray) -> np.ndarray:
-    return np.rint(image).clip(0, 255).astype(np.uint8)
-
-
-def _ensure_min_max(
-    settings: dict[str, Any],
-    min_key: str,
-    max_key: str,
-    name: str,
-) -> tuple[float, float]:
-    minimum = float(settings[min_key])
-    maximum = float(settings[max_key])
-    if minimum > maximum:
-        raise ValueError(f"{name}: {min_key} должен быть <= {max_key}")
-    return minimum, maximum
-
-
-class RobustOneOf(A.ImageOnlyTransform):
-    """Apply one randomly selected training corruption to the RGB image only."""
-
-    def __init__(self, augmentation: dict[str, Any], p: float) -> None:
-        super().__init__(p=p)
-        self.augmentation = augmentation
-        self.enabled_corruptions = [
-            name
-            for name in ROBUST_CORRUPTIONS
-            if augmentation.get(name, {}).get("enabled", False)
-        ]
-        if not self.enabled_corruptions:
-            raise ValueError("robust augmentation требует хотя бы одно enabled-искажение")
-        self._validate_settings()
-
-    def _validate_settings(self) -> None:
-        if "darkness" in self.enabled_corruptions:
-            minimum, maximum = _ensure_min_max(
-                self.augmentation["darkness"],
-                "min_factor",
-                "max_factor",
-                "darkness",
-            )
-            if not 0.0 < minimum <= maximum < 1.0:
-                raise ValueError("darkness factor должен быть между 0 и 1")
-        if "brightness" in self.enabled_corruptions:
-            minimum, maximum = _ensure_min_max(
-                self.augmentation["brightness"],
-                "min_factor",
-                "max_factor",
-                "brightness",
-            )
-            if minimum <= 1.0:
-                raise ValueError("brightness min_factor должен быть больше 1")
-            if maximum > 3.0:
-                raise ValueError("brightness max_factor слишком большой для обучения")
-        if "gaussian_blur" in self.enabled_corruptions:
-            settings = self.augmentation["gaussian_blur"]
-            kernel_sizes = [int(value) for value in settings["kernel_sizes"]]
-            if not kernel_sizes:
-                raise ValueError("gaussian_blur.kernel_sizes не должен быть пустым")
-            if any(value <= 1 or value % 2 == 0 for value in kernel_sizes):
-                raise ValueError("gaussian_blur kernel_sizes должны быть нечётными и > 1")
-            sigma_min, sigma_max = _ensure_min_max(
-                settings,
-                "sigma_min",
-                "sigma_max",
-                "gaussian_blur",
-            )
-            if sigma_min <= 0.0:
-                raise ValueError("gaussian_blur sigma_min должен быть > 0")
-        if "gaussian_noise" in self.enabled_corruptions:
-            sigma_min, sigma_max = _ensure_min_max(
-                self.augmentation["gaussian_noise"],
-                "sigma_min",
-                "sigma_max",
-                "gaussian_noise",
-            )
-            if sigma_min <= 0.0 or sigma_max <= 0.0:
-                raise ValueError("gaussian_noise sigma должен быть > 0")
-        if "jpeg_compression" in self.enabled_corruptions:
-            settings = self.augmentation["jpeg_compression"]
-            quality_min = int(settings["quality_min"])
-            quality_max = int(settings["quality_max"])
-            if not 1 <= quality_min <= quality_max <= 100:
-                raise ValueError("jpeg_compression quality должен быть от 1 до 100")
-
-    def get_params(self) -> dict[str, Any]:
-        corruption = str(np.random.choice(self.enabled_corruptions))
-        if corruption == "darkness":
-            minimum, maximum = _ensure_min_max(
-                self.augmentation["darkness"],
-                "min_factor",
-                "max_factor",
-                "darkness",
-            )
-            return {
-                "corruption": corruption,
-                "factor": float(np.random.uniform(minimum, maximum)),
-            }
-        if corruption == "brightness":
-            minimum, maximum = _ensure_min_max(
-                self.augmentation["brightness"],
-                "min_factor",
-                "max_factor",
-                "brightness",
-            )
-            return {
-                "corruption": corruption,
-                "factor": float(np.random.uniform(minimum, maximum)),
-            }
-        if corruption == "gaussian_blur":
-            settings = self.augmentation["gaussian_blur"]
-            kernel_size = int(np.random.choice(settings["kernel_sizes"]))
-            sigma = float(np.random.uniform(settings["sigma_min"], settings["sigma_max"]))
-            return {
-                "corruption": corruption,
-                "kernel_size": kernel_size,
-                "sigma": sigma,
-            }
-        if corruption == "gaussian_noise":
-            settings = self.augmentation["gaussian_noise"]
-            sigma = float(np.random.uniform(settings["sigma_min"], settings["sigma_max"]))
-            return {"corruption": corruption, "sigma": sigma}
-        settings = self.augmentation["jpeg_compression"]
-        quality = int(np.random.randint(settings["quality_min"], settings["quality_max"] + 1))
-        return {"corruption": corruption, "quality": quality}
-
-    def apply(
-        self,
-        image: np.ndarray,
-        corruption: str,
-        factor: float = 1.0,
-        kernel_size: int = 3,
-        sigma: float = 1.0,
-        quality: int = 85,
-        **params: Any,
-    ) -> np.ndarray:
-        del params
-        if corruption == "darkness":
-            return _clip_uint8(image.astype(np.float32) * factor)
-        if corruption == "brightness":
-            return _clip_uint8(image.astype(np.float32) * factor)
-        if corruption == "gaussian_blur":
-            return cv2.GaussianBlur(
-                image,
-                (kernel_size, kernel_size),
-                sigmaX=sigma,
-                sigmaY=sigma,
-            )
-        if corruption == "gaussian_noise":
-            noise = np.random.normal(0.0, sigma, size=image.shape).astype(np.float32)
-            return _clip_uint8(image.astype(np.float32) + noise)
-        if corruption != "jpeg_compression":
-            raise ValueError(f"Неизвестное robust-искажение: {corruption}")
-        success, encoded = cv2.imencode(
-            ".jpg",
-            image,
-            [int(cv2.IMWRITE_JPEG_QUALITY), int(quality)],
-        )
-        if not success:
-            raise ValueError("OpenCV не смог закодировать JPEG")
-        decoded = cv2.imdecode(encoded, cv2.IMREAD_COLOR)
-        if decoded is None:
-            raise ValueError("OpenCV не смог декодировать JPEG")
-        return decoded.astype(np.uint8)
-
-    def get_transform_init_args_names(self) -> tuple[str, ...]:
-        return ()
-
-
 def build_transform(
     train: bool,
     width: int = 384,
     height: int = 192,
-    robust_augmentation_config: dict[str, Any] | None = None,
 ) -> A.Compose:
-    """Build deterministic transforms with optional robust training corruption."""
+    """Build deterministic resize, normalization and tensor conversion."""
+    del train
     if width <= 0 or height <= 0:
         raise ValueError("width и height должны быть положительными")
-    augmentation = robust_augmentation_config or {}
-    robust = str(augmentation.get("policy", "")).lower() == "robust"
-    robust_probability = float(augmentation.get("robust_one_of_probability", 0.0))
-    if not 0.0 <= robust_probability <= 1.0:
-        raise ValueError("robust_one_of_probability должен быть между 0 и 1")
 
     transforms: list[Any] = [
         A.Resize(
@@ -510,8 +331,6 @@ def build_transform(
             mask_interpolation=cv2.INTER_NEAREST,
         )
     ]
-    if train and robust and robust_probability > 0.0:
-        transforms.append(RobustOneOf(augmentation=augmentation, p=robust_probability))
     transforms.extend(
         [
             A.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
@@ -534,6 +353,7 @@ class CityscapesDataset(Dataset):
         height: int = 192,
         transform: A.Compose | None = None,
         image_corruption: Callable[[np.ndarray, str], np.ndarray] | None = None,
+        training_plan: pd.DataFrame | None = None,
     ) -> None:
         self.dataset_root = Path(dataset_root).expanduser().resolve()
         if not self.dataset_root.is_dir():
@@ -558,26 +378,35 @@ class CityscapesDataset(Dataset):
         if split not in {"train", "dev", "val"}:
             raise ValueError("split должен быть train, dev или val")
         if train and split != "train":
-            raise ValueError("Случайные train-преобразования разрешены только для train")
+            raise ValueError("Train-преобразования разрешены только для train")
         if train and image_corruption is not None:
             raise ValueError(
                 "Детерминированные corruption-преобразования предназначены только "
                 "для validation/evaluation"
             )
+        if training_plan is not None and not train:
+            raise ValueError("Training plan предназначен только для train")
+        if training_plan is not None and image_corruption is not None:
+            raise ValueError("Training plan и evaluation corruption нельзя совмещать")
 
         self.rows = frame.loc[frame["split"] == split].reset_index(drop=True)
         if self.rows.empty:
             raise ValueError(f"В manifest нет строк для split={split}")
         if transform is not None and not train:
             raise ValueError(
-                "Для dev/val используется только фиксированное преобразование "
-                "без случайных аугментаций"
+                "Для dev/val используется только встроенное фиксированное "
+                "преобразование"
             )
         self.image_corruption = image_corruption
         self.transform = transform or build_transform(train, width, height)
+        self.training_plan_rows: dict[tuple[int, str], dict[str, Any]] = {}
+        if training_plan is not None:
+            for plan_row in training_plan.to_dict(orient="records"):
+                key = (int(plan_row["epoch"]), str(plan_row["image_id"]))
+                self.training_plan_rows[key] = plan_row
         self.corruption_resize = None
         self.corruption_normalize = None
-        if image_corruption is not None:
+        if image_corruption is not None or training_plan is not None:
             # Corruption parameters are defined at the model input resolution.
             # The mask participates only in deterministic nearest-neighbour resize.
             self.corruption_resize = A.Resize(
@@ -596,8 +425,14 @@ class CityscapesDataset(Dataset):
     def __len__(self) -> int:
         return len(self.rows)
 
-    def __getitem__(self, index: int) -> dict[str, Any]:
-        row = self.rows.iloc[index]
+    def __getitem__(self, index: int | tuple[int, int]) -> dict[str, Any]:
+        epoch: int | None = None
+        dataset_index = index
+        if isinstance(index, tuple):
+            if len(index) != 2:
+                raise ValueError("Training plan index должен содержать epoch и index")
+            epoch, dataset_index = int(index[0]), int(index[1])
+        row = self.rows.iloc[int(dataset_index)]
         image_id = str(row["image_id"])
         image_path = self.dataset_root / str(row["image_path"])
         mask_path = self.dataset_root / str(row["mask_path"])
@@ -617,13 +452,27 @@ class CityscapesDataset(Dataset):
                 f"не совпадают для image_id={image_id}"
             )
 
-        if self.image_corruption is not None:
+        plan_row = None
+        if self.training_plan_rows:
+            plan_epoch = 1 if epoch is None else epoch
+            plan_row = self.training_plan_rows.get((plan_epoch, image_id))
+            if plan_row is None:
+                raise ValueError(
+                    f"Training plan не содержит epoch={plan_epoch}, image_id={image_id}"
+                )
+
+        if plan_row is not None or self.image_corruption is not None:
             if self.corruption_resize is None or self.corruption_normalize is None:
                 raise RuntimeError("Внутренние corruption-преобразования не созданы")
             resized = self.corruption_resize(image=image, mask=mask)
-            corrupted_image = self.image_corruption(
-                resized["image"].copy(), image_id
-            )
+            if plan_row is not None:
+                corrupted_image = apply_training_plan_corruption(
+                    resized["image"].copy(), plan_row
+                )
+            else:
+                corrupted_image = self.image_corruption(
+                    resized["image"].copy(), image_id
+                )
             if not isinstance(corrupted_image, np.ndarray):
                 raise TypeError(
                     f"Corruption для image_id={image_id} вернул не NumPy-массив"

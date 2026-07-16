@@ -6,7 +6,7 @@
 ## Google Colab
 
 1. Откройте `notebooks/run_all_colab.ipynb` и включите GPU.
-2. Выполните разделы 1–10 по порядку. Ветка `codex/no-baseline-augmentation` загружается
+2. Выполните разделы 1–10 по порядку. Ветка `codex/deterministic-training-plan` загружается
    один раз в разделе 4.
 3. Откройте секцию нужной модели: U-Net, DeepLabV3+ или PSPNet.
 4. В параметрах выбранной модели задайте `RUN_NAME` и гиперпараметры.
@@ -55,15 +55,29 @@ Baseline settings должны оставаться:
 ```
 
 В baseline-настройках блока `augmentation` нет.
-Для baseline train-transform выполняет только resize, ImageNet normalize и tensor conversion.
-Для robust train-transform выполняет resize, одно optional robust-искажение, ImageNet normalize
-и tensor conversion. `HorizontalFlip` не используется ни в одном из этих режимов.
+Baseline-изображение проходит только resize, ImageNet normalize и tensor conversion.
+Для robust-run между resize и normalize применяется ровно то искажение, которое записано
+для изображения и эпохи в `training_plan.csv`. `HorizontalFlip` не используется ни в одном режиме.
 
-При `ROBUST_AUGMENTATION` train-transform с вероятностью 0.5 применяет ровно одно
-искажение из пяти seen-вариантов: darkness, brightness, gaussian blur, gaussian noise
-или JPEG compression. Выбор вида равномерный, поэтому каждое seen-искажение получает
-примерно 10% train-сэмплов. Fog в train не используется и остаётся unseen corruption
+При `corrupted_fraction: 0.5` план заранее оставляет половину каждой эпохи clean,
+а вторую половину распределяет между darkness, brightness, gaussian blur, gaussian noise
+и JPEG compression с разницей не более одного изображения. Вид, параметры и `noise_seed` хранятся
+в `training_plan.csv`. Fog в train не используется и остаётся unseen corruption
 для оценки.
+
+## Детерминированный training plan
+
+При новом обучении `training_plan.csv` создаётся автоматически в `runs/<RUN_NAME>/`.
+Каждая эпоха содержит все train-`image_id` ровно по одному разу, а её полный порядок
+не повторяет другие эпохи. Split проверяется прямым сравнением `image_id`, без fingerprint
+и хешей.
+При одинаковых split, `seed` и числе эпох baseline-модели получают одинаковый порядок.
+Robust-модели с одинаковыми настройками дополнительно получают одинаковые изображения,
+виды и параметры искажений.
+
+Старые run-ы без `training_plan.csv` в этой ветке не возобновляются и не дообучаются.
+Для них остаётся ветка `codex/no-baseline-augmentation`; обычная оценка и qualitative
+export старых весов не требуют плана и продолжают работать.
 
 ## Resume после обрыва runtime
 
@@ -71,8 +85,8 @@ Baseline settings должны оставаться:
 2. Укажите прежний `RUN_NAME`.
 3. Задайте `RESUME_TRAINING = True` и `CONTINUE_FROM_RUN = None`.
 4. Запустите train/resume/continue ячейку выбранной модели. Будут загружены
-   `last.pt`, optimizer, scaler и история CSV.
-   Существующий `run_config.yaml` не перезаписывается.
+   `last.pt`, optimizer, scaler, история CSV и существующий `training_plan.csv`.
+   Порядок будет взят из строк следующей абсолютной эпохи.
 
 Не меняйте модель, encoder или размер изображения внутри незавершённого запуска.
 Для других параметров создайте новый `RUN_NAME`.
@@ -92,11 +106,12 @@ Baseline settings должны оставаться:
 
 Новый `run_config.yaml` сохранит `init_from_run`, `init_from_model_dir`,
 `init_checkpoint`, `initial_checkpoint_epoch`, `additional_epochs` и общий
-`training.epochs`, поэтому архив будет воспроизводимым.
+`training.epochs`. Новый `training_plan.csv` скопирует эпохи до выбранного checkpoint
+и добавит детерминированные порядки новых эпох.
 
 ## Где лежат результаты и модели
 
-- `runs/<RUN_NAME>/` содержит `run_config.yaml`, CSV, сведения об окружении и
+- `runs/<RUN_NAME>/` содержит `run_config.yaml`, `training_plan.csv`, CSV, сведения об окружении и
   таблицы оценок. После явного qualitative export там также появляется папка
   `predictions/qualitative/` с выбранными изображениями.
 - `models/<RUN_NAME>/` содержит только веса модели: `best.pt` и `last.pt`.

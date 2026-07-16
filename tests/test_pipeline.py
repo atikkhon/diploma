@@ -53,6 +53,14 @@ from src.qualitative import (
     write_class_schema,
 )
 from src.train import create_grad_scaler, train_model
+from src.training_plan import (
+    TRAINING_PLAN_COLUMNS,
+    TrainingPlanSampler,
+    apply_training_plan_corruption,
+    generate_training_plan,
+    prepare_training_plan,
+    validate_training_plan,
+)
 from src.visualization import (
     colorize_mask,
     create_segmentation_preview,
@@ -181,56 +189,207 @@ def test_baseline_train_transform_is_deterministic_without_augmentation() -> Non
     }
 
 
-def test_robust_train_transform_preserves_mask_values() -> None:
+def robust_augmentation(fraction: float = 0.5) -> dict:
+    return {
+        "policy": "robust",
+        "corrupted_fraction": fraction,
+        "darkness": {
+            "enabled": True,
+            "min_factor": 0.55,
+            "max_factor": 0.95,
+        },
+        "brightness": {
+            "enabled": True,
+            "min_factor": 1.05,
+            "max_factor": 1.60,
+        },
+        "gaussian_blur": {
+            "enabled": True,
+            "kernel_sizes": [3, 5],
+            "sigma_min": 0.3,
+            "sigma_max": 1.2,
+        },
+        "gaussian_noise": {
+            "enabled": True,
+            "sigma_min": 3.0,
+            "sigma_max": 10.0,
+        },
+        "jpeg_compression": {
+            "enabled": True,
+            "quality_min": 40,
+            "quality_max": 85,
+        },
+    }
+
+
+def test_training_plan_is_deterministic_complete_and_unique() -> None:
+    image_ids = [f"image_{index:03d}" for index in range(10)]
+    first = generate_training_plan(image_ids, epochs=4, seed=42)
+    second = generate_training_plan(list(reversed(image_ids)), epochs=4, seed=42)
+
+    pd.testing.assert_frame_equal(first, second)
+    validate_training_plan(first, image_ids, epochs=4)
+    assert list(first.columns) == list(TRAINING_PLAN_COLUMNS)
+    assert set(first["corruption"]) == {"clean"}
+    orders = [
+        tuple(
+            first.loc[first["epoch"] == epoch]
+            .sort_values("position")["image_id"]
+            .tolist()
+        )
+        for epoch in range(1, 5)
+    ]
+    assert len(set(orders)) == 4
+    assert all(set(order) == set(image_ids) for order in orders)
+
+
+def test_training_plan_sampler_selects_absolute_epoch_order() -> None:
+    image_ids = [f"image_{index:03d}" for index in range(10)]
+    dataset_order = list(reversed(image_ids))
+    plan = generate_training_plan(image_ids, epochs=4, seed=42)
+    sampler = TrainingPlanSampler(plan, dataset_order)
+    sampler.set_epoch(3)
+
+    sampled_ids = [dataset_order[index] for epoch, index in sampler]
+    expected_ids = (
+        plan.loc[plan["epoch"] == 3]
+        .sort_values("position")["image_id"]
+        .tolist()
+    )
+    assert sampled_ids == expected_ids
+    assert all(epoch == 3 for epoch, _ in sampler)
+
+
+def test_training_plan_continue_matches_direct_generation() -> None:
+    image_ids = [f"image_{index:03d}" for index in range(10)]
+    prefix = generate_training_plan(image_ids, epochs=2, seed=42)
+    continued = generate_training_plan(
+        image_ids,
+        epochs=4,
+        seed=42,
+        prefix=prefix,
+    )
+    direct = generate_training_plan(image_ids, epochs=4, seed=42)
+    pd.testing.assert_frame_equal(continued.reset_index(drop=True), direct)
+
+
+def test_training_plan_files_support_resume_and_continue(tmp_path: Path) -> None:
+    image_ids = [f"image_{index:03d}" for index in range(10)]
+    manifest = tmp_path / "split_manifest.csv"
+    pd.DataFrame(
+        {
+            "image_id": image_ids + ["official_val_000"],
+            "split": ["train"] * len(image_ids) + ["val"],
+        }
+    ).to_csv(manifest, index=False)
+
+    source_path = tmp_path / "source" / "training_plan.csv"
+    source = prepare_training_plan(source_path, manifest, epochs=2, seed=42)
+    resumed = prepare_training_plan(
+        source_path,
+        manifest,
+        epochs=2,
+        seed=42,
+        resume=True,
+    )
+    pd.testing.assert_frame_equal(source, resumed)
+
+    continued_path = tmp_path / "continued" / "training_plan.csv"
+    continued = prepare_training_plan(
+        continued_path,
+        manifest,
+        epochs=4,
+        seed=42,
+        source_plan=source_path,
+        initial_epoch=2,
+    )
+    direct = generate_training_plan(image_ids, epochs=4, seed=42)
+    pd.testing.assert_frame_equal(continued.reset_index(drop=True), direct)
+
+
+def test_robust_training_plan_is_balanced_and_reproducible() -> None:
+    image_ids = [f"image_{index:03d}" for index in range(20)]
+    plan = generate_training_plan(
+        image_ids,
+        epochs=5,
+        seed=42,
+        augmentation=robust_augmentation(),
+    )
+    repeated = generate_training_plan(
+        image_ids,
+        epochs=5,
+        seed=42,
+        augmentation=robust_augmentation(),
+    )
+    pd.testing.assert_frame_equal(plan, repeated)
+    baseline = generate_training_plan(image_ids, epochs=5, seed=42)
+    pd.testing.assert_frame_equal(
+        plan.loc[:, ["epoch", "position", "image_id"]],
+        baseline.loc[:, ["epoch", "position", "image_id"]],
+    )
+
+    for epoch in range(1, 6):
+        counts = plan.loc[plan["epoch"] == epoch, "corruption"].value_counts()
+        assert counts["clean"] == 10
+        assert counts.drop("clean").to_dict() == {
+            "darkness": 2,
+            "brightness": 2,
+            "gaussian_blur": 2,
+            "gaussian_noise": 2,
+            "jpeg_compression": 2,
+        }
+
+    noise_row = plan.loc[plan["corruption"] == "gaussian_noise"].iloc[0]
     image = np.full((24, 48, 3), 120, dtype=np.uint8)
-    image[:, :, 1] = np.arange(48, dtype=np.uint8)[None, :] * 4
-    mask = np.zeros((24, 48), dtype=np.uint8)
-    mask[:, 12:24] = 1
-    mask[:, 24:36] = 18
-    mask[:, 36:] = 255
-    transform = build_transform(
+    first_noise = apply_training_plan_corruption(image, noise_row)
+    second_noise = apply_training_plan_corruption(image, noise_row)
+    assert np.array_equal(first_noise, second_noise)
+    assert not np.array_equal(first_noise, image)
+
+
+def test_training_plan_corruption_changes_only_train_image(
+    tiny_cityscapes: dict[str, Path],
+) -> None:
+    manifest = pd.read_csv(tiny_cityscapes["manifest"])
+    train_ids = sorted(manifest.loc[manifest["split"] == "train", "image_id"])
+    settings = robust_augmentation(fraction=1.0)
+    for name in (
+        "brightness",
+        "gaussian_blur",
+        "gaussian_noise",
+        "jpeg_compression",
+    ):
+        settings[name]["enabled"] = False
+    robust_plan = generate_training_plan(
+        train_ids,
+        epochs=2,
+        seed=42,
+        augmentation=settings,
+    )
+    baseline_plan = generate_training_plan(train_ids, epochs=2, seed=42)
+    robust_dataset = CityscapesDataset(
+        manifest_path=tiny_cityscapes["manifest"],
+        dataset_root=tiny_cityscapes["root"],
+        split="train",
         train=True,
         width=48,
         height=24,
-        robust_augmentation_config={
-            "policy": "robust",
-            "robust_one_of_probability": 1.0,
-            "darkness": {
-                "enabled": True,
-                "min_factor": 0.55,
-                "max_factor": 0.95,
-            },
-            "brightness": {
-                "enabled": True,
-                "min_factor": 1.05,
-                "max_factor": 1.60,
-            },
-            "gaussian_blur": {
-                "enabled": True,
-                "kernel_sizes": [3, 5],
-                "sigma_min": 0.3,
-                "sigma_max": 1.2,
-            },
-            "gaussian_noise": {
-                "enabled": True,
-                "sigma_min": 3.0,
-                "sigma_max": 10.0,
-            },
-            "jpeg_compression": {
-                "enabled": True,
-                "quality_min": 40,
-                "quality_max": 85,
-            },
-        },
+        training_plan=robust_plan,
     )
-    sample = transform(image=image, mask=mask)
-    assert tuple(sample["image"].shape) == (3, 24, 48)
-    assert tuple(sample["mask"].shape) == (24, 48)
-    assert set(torch.unique(sample["mask"]).tolist()) == {0, 1, 18, 255}
-    assert sample["image"].dtype == torch.float32
-    assert "HorizontalFlip" not in {
-        type(item).__name__ for item in transform.transforms
-    }
+    baseline_dataset = CityscapesDataset(
+        manifest_path=tiny_cityscapes["manifest"],
+        dataset_root=tiny_cityscapes["root"],
+        split="train",
+        train=True,
+        width=48,
+        height=24,
+        training_plan=baseline_plan,
+    )
+
+    robust_sample = robust_dataset[(1, 0)]
+    baseline_sample = baseline_dataset[(1, 0)]
+    assert torch.equal(robust_sample["mask"], baseline_sample["mask"])
+    assert not torch.equal(robust_sample["image"], baseline_sample["image"])
 
 
 def test_mask_validation_and_ignore_index() -> None:
@@ -405,6 +564,8 @@ def test_run_paths_are_isolated(tmp_path: Path) -> None:
         paths.append(run_paths)
     assert paths[0].root != paths[1].root
     assert paths[0].history != paths[1].history
+    assert paths[0].training_plan != paths[1].training_plan
+    assert paths[0].training_plan.parent == paths[0].root
     assert paths[0].best_checkpoint != paths[1].best_checkpoint
     assert paths[0].root.parent.name == "runs"
     assert paths[0].checkpoints.parent.name == "models"

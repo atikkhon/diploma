@@ -288,6 +288,10 @@ def train_model(
         return pd.DataFrame(history_rows), best_path, resume_file or last_path
 
     for epoch in range(start_epoch, epochs + 1):
+        train_sampler = getattr(train_loader, "sampler", None)
+        set_epoch = getattr(train_sampler, "set_epoch", None)
+        if set_epoch is not None:
+            set_epoch(epoch)
         if device.type == "cuda":
             torch.cuda.reset_peak_memory_stats(device)
         started_at = time.perf_counter()

@@ -16,6 +16,7 @@ class RunPaths:
     best_checkpoint: Path
     last_checkpoint: Path
     history: Path
+    training_plan: Path
     evaluations: Path
     per_class: Path
 
@@ -47,6 +48,7 @@ def make_run_paths(config: dict[str, Any], project_root: str | Path) -> RunPaths
         best_checkpoint=model_root / "best.pt",
         last_checkpoint=model_root / "last.pt",
         history=run_root / "metrics" / "training_history.csv",
+        training_plan=run_root / "training_plan.csv",
         evaluations=run_root / "metrics" / "evaluation_results.csv",
         per_class=run_root / "metrics" / "per_class_iou.csv",
     )
